@@ -2527,9 +2527,10 @@ PipelineCache::PipelineCache(GraphicContext& graphics)
 		if (g_live_pipeline_cache != nullptr) g_live_pipeline_cache->ReportObjects(id);
 	};
 	m_program_cache->push_job = [this](std::function<void()> job) { TableWorkers().Push(std::move(job)); };
-	InitializeDriverCache();
+	// (The static store first: whether it is there sets how much of the driver caches is loaded.)
 	StartupProgress::Report("Loading the pipeline cache", 0, 0);
 	InitializeStaticCache(false);
+	InitializeDriverCache();
 	// Not in the static precompile: a shell that ran the game passes its KYTY_SHADER_WARMUP(_ONLY) on.
 #ifndef KYTY_STATIC_PRECOMPILE
 	PipelineCacheLog("Pipelines in no cache: {}", FirstBuild(m_graphics) == PipelineBuild::Fast
@@ -3306,9 +3307,17 @@ void PipelineCache::InitializeDriverCache() {
 	// passes 1/64 of 16 GB: 256 MiB, 265 MiB after 30 minutes of 1-1, issue #14; a 16 GB PC is short of RAM as it is),
 	// 1/16 of the RAM from 24 GB (a 1.2 GB cache on a 32 GB PC started over at every launch, issue #9): a cache that
 	// starts over compiles its pipelines in play again.
+	// With the static store (binaries or blobs: the precompile's recorded pipelines, their table and native variants
+	// included) a driver cache only holds what the store lacks: ~4 MB a session at 1-1, the table cache nothing. Caches
+	// past StoreLimit are pipelines piled up over earlier builds and stores (0.86 + 0.43 GB on a desktop, each copied
+	// whole by the driver into the process: 1.5 GB of its pools) and start over once; what they held comes from the store
+	// or the driver's own disk cache (1-1 with both caches empty: the same pipelines made in play in the same time).
 	const uint64_t ram       = LocalPlatform::PhysicalMemory();
-	const auto     ram_limit = [ram](uint64_t limit) {
-		return ram != 0 ? std::min(limit, ram >= (uint64_t {24} << 30u) ? ram / 16u : uint64_t {512} << 20u) : limit;
+	const bool     store     = m_static_binaries != nullptr || m_static_blobs != nullptr;
+	const auto     ram_limit = [ram, store](uint64_t limit) {
+		constexpr uint64_t StoreLimit = uint64_t {256} << 20u;
+		if (ram != 0) limit = std::min(limit, ram >= (uint64_t {24} << 30u) ? ram / 16u : uint64_t {512} << 20u);
+		return store ? std::min(limit, StoreLimit) : limit;
 	};
 	m_driver_cache = LoadDriverCache(m_driver_cache_path, ram_limit(uint64_t {2} << 30u), m_driver_cache_saved_size);
 	if (m_driver_cache == nullptr) return;
