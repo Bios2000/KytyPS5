@@ -3310,8 +3310,10 @@ void PipelineCache::InitializeDriverCache() {
 	// With the static store (binaries or blobs: the precompile's recorded pipelines, their table and native variants
 	// included) a driver cache only holds what the store lacks: ~4 MB a session at 1-1, the table cache nothing. Caches
 	// past StoreLimit are pipelines piled up over earlier builds and stores (0.86 + 0.43 GB on a desktop, each copied
-	// whole by the driver into the process: 1.5 GB of its pools) and start over once; what they held comes from the store
-	// or the driver's own disk cache (1-1 with both caches empty: the same pipelines made in play in the same time).
+	// whole by the driver into the process: 1.5 GB of its pools) and start over once; what they held comes from the store,
+	// or compiles once more (1-1: ~170 native XPR variants on the async workers, their draws on the normal path meanwhile;
+	// the render thread made the same pipelines in the same time). Such small caches are also saved at least every
+	// SmallSaveSeconds while compiles go on: a session that never settles 20 s and does not exit cleanly kept none of them.
 	const uint64_t ram       = LocalPlatform::PhysicalMemory();
 	const bool     store     = m_static_binaries != nullptr || m_static_blobs != nullptr;
 	const auto     ram_limit = [ram, store](uint64_t limit) {
@@ -3328,17 +3330,22 @@ void PipelineCache::InitializeDriverCache() {
 	m_table_cache_path.replace_extension(".table.bin");
 	m_table_cache = LoadDriverCache(m_table_cache_path, ram_limit(uint64_t {2} << 30u), m_table_cache_saved_size);
 	if (m_table_cache == nullptr) return;
-	m_table_cache_saver = std::jthread([this](std::stop_token stop) {
+	m_table_cache_saver = std::jthread([this, store_sized = store](std::stop_token stop) {
 		LocalPlatform::SetThreadName("Kyty.TableCache");
 		LocalPlatform::MakeBackgroundThread(std::getenv("KYTY_RENDER_CPUS"));
+		constexpr int64_t           SmallSaveSeconds = 60;
 		std::mutex                  mutex;
 		std::condition_variable_any wake;
 		uint64_t                    saved      = m_table_pipelines_done.load();
 		uint64_t                    main_saved = m_main_pipelines_done.load();
-		const auto settled = [](const std::atomic<int64_t>& last_done) {
+		auto                        table_at   = std::chrono::steady_clock::now();
+		auto                        main_at    = table_at;
+		const auto settled = [&](const std::atomic<int64_t>& last_done, std::chrono::steady_clock::time_point saved_at) {
+			const auto now  = std::chrono::steady_clock::now();
 			const auto last = std::chrono::steady_clock::time_point(
 			    std::chrono::steady_clock::duration(last_done.load(std::memory_order_acquire)));
-			return std::chrono::steady_clock::now() - last >= std::chrono::seconds(20);
+			return now - last >= std::chrono::seconds(20) ||
+			       (store_sized && now - saved_at >= std::chrono::seconds(SmallSaveSeconds));
 		};
 		while (!stop.stop_requested()) {
 			{
@@ -3349,14 +3356,16 @@ void PipelineCache::InitializeDriverCache() {
 			if (stop.stop_requested()) break;
 			if (const auto done = m_table_pipelines_done.load(std::memory_order_acquire);
 			    done != saved && m_table_pipeline_jobs.load(std::memory_order_acquire) == 0 &&
-			    settled(m_table_pipeline_last_done)) {
+			    settled(m_table_pipeline_last_done, table_at)) {
 				std::lock_guard save(m_table_cache_mutex);
 				if (SaveDriverCache(m_table_cache, m_table_cache_path, m_table_cache_saved_size)) saved = done;
+				table_at = std::chrono::steady_clock::now();
 			}
 			if (const auto done = m_main_pipelines_done.load(std::memory_order_acquire);
-			    done != main_saved && settled(m_main_pipeline_last_done)) {
+			    done != main_saved && settled(m_main_pipeline_last_done, main_at)) {
 				std::lock_guard save(m_main_cache_mutex);
 				if (SaveDriverCache(m_driver_cache, m_driver_cache_path, m_driver_cache_saved_size)) main_saved = done;
+				main_at = std::chrono::steady_clock::now();
 			}
 		}
 	});
