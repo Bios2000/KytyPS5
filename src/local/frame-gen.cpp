@@ -62,6 +62,20 @@
 #include <string>
 #endif
 
+#ifdef KYTY_FRAMEGEN_NGX
+// NVIDIA DLSS on Linux, where Streamline does not exist: NGX through the bridge libkyty_dlss.so (tools/local/dlss-bridge),
+// loaded at run time, the only part that uses NVIDIA's SDK.
+#include "kyty-dlss-bridge.h"
+
+#include <dlfcn.h>
+
+#include <chrono>
+#include <cstdio>
+#include <filesystem>
+#include <string>
+#include <vector>
+#endif
+
 extern "C" {
 // DLSS-G frames' Reflex sleep (slReflexSleep, every present): 0 skips it (KYTY_FRAMEGEN_SLEEP=0).
 [[gnu::used]] volatile std::atomic<uint32_t> kyty_local_framegen_sleep {1};
@@ -842,6 +856,124 @@ ffxReturnCode_t FsrGenerate(ffxDispatchDescFrameGeneration* params, void* contex
 
 } // namespace
 
+#ifdef KYTY_FRAMEGEN_NGX
+namespace {
+
+const KytyDlssApi* g_dlss        = nullptr; // the bridge, when KYTY_UPSCALER=dlss found it
+bool               g_dlss_device = false;   // the device has the extensions NGX needs
+
+void DlssLog(int warning, const char* message) {
+	LOGF("DLSS: %s\n", message);
+	std::printf("DLSS%s: %s\n", warning != 0 ? " (warning)" : "", message);
+	std::fflush(stdout);
+}
+
+// Every way DLSS cannot run: the game keeps its own TAA (demonsSoulsSuperResolution.cpp).
+void DlssOff(const char* why) {
+	LOGF("DLSS super resolution: off (%s)\n", why);
+	std::printf("DLSS super resolution: off (%s)\n", why);
+	std::fflush(stdout);
+	g_dlss    = nullptr;
+	g_upscale = false;
+}
+
+std::filesystem::path ExecutableFolder() {
+	std::error_code error;
+	auto            exe = std::filesystem::read_symlink("/proc/self/exe", error);
+	return error ? std::filesystem::current_path(error) : exe.parent_path();
+}
+
+// The bridge: in KYTY_DLSS_DIR, else next to the emulator, else in a "dlss" folder next to it; NGX finds
+// libnvidia-ngx-dlss.so.* (and libnvidia-ngx-dlssg.so.*) in the same folder.
+bool LoadBridge() {
+	std::vector<std::filesystem::path> candidates;
+	if (const char* env = std::getenv("KYTY_DLSS_DIR"); env != nullptr && *env != 0) {
+		candidates.emplace_back(env);
+	} else {
+		const auto exe = ExecutableFolder();
+		candidates.push_back(exe);
+		candidates.push_back(exe / "dlss");
+	}
+	for (const auto& folder: candidates) {
+		const auto      path = folder / KYTY_DLSS_BRIDGE_LIBRARY;
+		std::error_code error;
+		if (!std::filesystem::exists(path, error)) continue;
+		void* module = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+		if (module == nullptr) {
+			std::printf("DLSS: cannot load %s (%s)\n", path.c_str(), dlerror());
+			return false;
+		}
+		const auto         get = reinterpret_cast<KytyDlssGetApiFn>(dlsym(module, KYTY_DLSS_BRIDGE_ENTRY));
+		const KytyDlssApi* api = get != nullptr ? get() : nullptr;
+		if (api == nullptr || api->abi != KYTY_DLSS_BRIDGE_ABI) {
+			std::printf("DLSS: %s is not a bridge of ABI %d (build it again with tools/local/dlss-bridge/build-dlss-linux.sh)\n",
+			            path.c_str(), KYTY_DLSS_BRIDGE_ABI);
+			dlclose(module);
+			return false;
+		}
+		// NGX's own data (logs, its model cache): writable, next to the emulator's other temporary data.
+		auto data = std::filesystem::current_path(error) / "_TempData" / "ngx";
+		std::filesystem::create_directories(data, error);
+		if (error) data = std::filesystem::temp_directory_path(error);
+		const auto folder_text = std::filesystem::absolute(folder, error).string();
+		if (api->Configure(folder_text.c_str(), data.c_str(), DlssLog) == 0) {
+			std::printf("DLSS: the bridge refused its configuration\n");
+			return false;
+		}
+		g_dlss = api;
+		LOGF("DLSS: bridge %s loaded\n", path.c_str());
+		std::printf("DLSS: bridge %s loaded\n", path.c_str());
+		std::fflush(stdout);
+		return true;
+	}
+	std::printf("DLSS: no %s (tools/local/dlss-bridge/build-dlss-linux.sh puts it next to kyty_emulator; or set "
+	            "KYTY_DLSS_DIR)\n",
+	            KYTY_DLSS_BRIDGE_LIBRARY);
+	std::fflush(stdout);
+	return false;
+}
+
+bool HasStencil(vk::Format format) {
+	return format == vk::Format::eD16UnormS8Uint || format == vk::Format::eD24UnormS8Uint ||
+	       format == vk::Format::eD32SfloatS8Uint;
+}
+
+KytyDlssImage BridgeImage(const UpscaleImage& image, vk::ImageAspectFlags aspect) {
+	KytyDlssImage out {};
+	out.image  = static_cast<VkImage>(image.image);
+	out.view   = static_cast<VkImageView>(image.view);
+	out.range  = {static_cast<VkImageAspectFlags>(aspect), image.base_level, 1, image.base_layer, 1};
+	out.format = static_cast<VkFormat>(image.format);
+	out.width  = image.extent.width;
+	out.height = image.extent.height;
+	return out;
+}
+
+// The depth as NGX samples it (shader read-only) and back to the layout the renderer left it in.
+void DepthLayout(vk::CommandBuffer command, const UpscaleImage& depth, vk::ImageLayout from, vk::ImageLayout to,
+                 const vk::detail::DispatchLoaderDynamic& dispatch) {
+	vk::ImageAspectFlags aspect = vk::ImageAspectFlagBits::eDepth;
+	if (HasStencil(depth.format)) aspect |= vk::ImageAspectFlagBits::eStencil;
+	vk::ImageMemoryBarrier2 barrier {};
+	barrier.srcStageMask        = vk::PipelineStageFlagBits2::eAllCommands;
+	barrier.srcAccessMask       = vk::AccessFlagBits2::eMemoryWrite;
+	barrier.dstStageMask        = vk::PipelineStageFlagBits2::eAllCommands;
+	barrier.dstAccessMask       = vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite;
+	barrier.oldLayout           = from;
+	barrier.newLayout           = to;
+	barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.image               = depth.image;
+	barrier.subresourceRange    = {aspect, depth.base_level, 1, depth.base_layer, 1};
+	vk::DependencyInfo dependency {};
+	dependency.imageMemoryBarrierCount = 1;
+	dependency.pImageMemoryBarriers    = &barrier;
+	command.pipelineBarrier2(dependency, dispatch);
+}
+
+} // namespace
+#endif
+
 bool Enabled() {
 	return g_ready;
 }
@@ -1131,9 +1263,78 @@ void Initialize() {
 	LOGF("frame generation: Streamline loaded from %s, %d generated frame(s), DLSS super resolution %s\n",
 	     dir.string().c_str(), g_generate, g_upscale ? "asked for" : "off");
 	off.done = true;
+#elif defined(KYTY_FRAMEGEN_NGX)
+	if (g_generate > 0) {
+		// (NGX makes the frames, but the presenter does not show them yet on Linux: Streamline did that on Windows.)
+		LOGF("frame generation: not on Linux yet (KYTY_FRAMEGEN ignored)\n");
+		std::printf("Frame generation: not on Linux yet, KYTY_FRAMEGEN is ignored (DLSS super resolution: "
+		            "KYTY_UPSCALER=dlss)\n");
+		std::fflush(stdout);
+		g_generate = 0;
+	}
+	if (!g_upscale || !LoadBridge()) return;
+	off.done = true;
 #else
 	LOGF("frame generation: this build has no Streamline support\n");
 	std::printf("DLSS: this build has no Streamline support\n");
+#endif
+}
+
+void AddInstanceExtensions(const std::vector<vk::ExtensionProperties>& available, std::vector<const char*>& extensions) {
+#ifdef KYTY_FRAMEGEN_NGX
+	if (g_dlss == nullptr) return;
+	uint32_t                     count  = 0;
+	const VkExtensionProperties* wanted = nullptr;
+	if (g_dlss->InstanceExtensions(&count, &wanted) == 0) return DlssOff("NGX named no instance extensions");
+	for (uint32_t i = 0; i < count; ++i) {
+		const char* name = wanted[i].extensionName;
+		if (std::none_of(available.begin(), available.end(),
+		                 [&](const vk::ExtensionProperties& item) { return std::strcmp(item.extensionName.data(), name) == 0; })) {
+			std::printf("DLSS: the Vulkan instance has no %s\n", name);
+			return DlssOff("an instance extension NGX needs is missing");
+		}
+	}
+	for (uint32_t i = 0; i < count; ++i) {
+		const char* name = wanted[i].extensionName;
+		if (std::none_of(extensions.begin(), extensions.end(), [&](const char* have) { return std::strcmp(have, name) == 0; }))
+			extensions.push_back(name);
+	}
+	LOGF("DLSS: %u instance extension(s) for NGX\n", count);
+#else
+	(void)available;
+	(void)extensions;
+#endif
+}
+
+void AddDeviceExtensions(vk::Instance instance, vk::PhysicalDevice physical_device,
+                         const std::vector<vk::ExtensionProperties>& available, std::vector<const char*>& extensions) {
+#ifdef KYTY_FRAMEGEN_NGX
+	if (g_dlss == nullptr) return;
+	uint32_t                     count  = 0;
+	const VkExtensionProperties* wanted = nullptr;
+	if (g_dlss->DeviceExtensions(static_cast<VkInstance>(instance), static_cast<VkPhysicalDevice>(physical_device), &count,
+	                             &wanted) == 0)
+		return DlssOff("NGX does not offer DLSS with this GPU and driver (an NVIDIA RTX GPU and a recent driver)");
+	for (uint32_t i = 0; i < count; ++i) {
+		const char* name = wanted[i].extensionName;
+		if (std::none_of(available.begin(), available.end(),
+		                 [&](const vk::ExtensionProperties& item) { return std::strcmp(item.extensionName.data(), name) == 0; })) {
+			std::printf("DLSS: the GPU has no %s\n", name);
+			return DlssOff("a device extension NGX needs is missing");
+		}
+	}
+	for (uint32_t i = 0; i < count; ++i) {
+		const char* name = wanted[i].extensionName;
+		if (std::none_of(extensions.begin(), extensions.end(), [&](const char* have) { return std::strcmp(have, name) == 0; }))
+			extensions.push_back(name);
+	}
+	g_dlss_device = true;
+	LOGF("DLSS: %u device extension(s) for NGX\n", count);
+#else
+	(void)instance;
+	(void)physical_device;
+	(void)available;
+	(void)extensions;
 #endif
 }
 
@@ -1153,6 +1354,18 @@ void OnDevice(vk::Instance instance, vk::PhysicalDevice physical_device, vk::Dev
 			std::printf("DLSS super resolution: ready\n");
 		} else {
 			std::printf("DLSS super resolution: not available on this device (the game's image is upscaled without it)\n");
+		}
+		std::fflush(stdout);
+	}
+#elif defined(KYTY_FRAMEGEN_NGX)
+	if (g_upscale && g_dlss != nullptr && g_dlss_device) {
+		auto& dispatch = VULKAN_HPP_DEFAULT_DISPATCHER;
+		if (g_dlss->Initialize(static_cast<VkInstance>(instance), static_cast<VkPhysicalDevice>(physical_device),
+		                       static_cast<VkDevice>(device), dispatch.vkGetInstanceProcAddr, dispatch.vkGetDeviceProcAddr) != 0) {
+			g_upscale_ready = true;
+			std::printf("DLSS super resolution: ready (NVIDIA NGX)\n");
+		} else {
+			std::printf("DLSS super resolution: not available on this device (the game keeps its own TAA)\n");
 		}
 		std::fflush(stdout);
 	}
@@ -1593,7 +1806,8 @@ bool UpscalerReady() {
 	return g_upscale_ready;
 }
 
-bool Upscale(vk::CommandBuffer command, const UpscaleInputs& inputs) {
+bool Upscale(vk::CommandBuffer command, const UpscaleInputs& inputs, const vk::detail::DispatchLoaderDynamic& dispatch) {
+	(void)dispatch;
 #ifdef KYTY_FRAMEGEN_STREAMLINE
 	if (!g_upscale_ready) return false;
 	// Its own viewport: DLSS-G's (0) takes its constants and tags at the present.
@@ -1763,6 +1977,107 @@ bool Upscale(vk::CommandBuffer command, const UpscaleInputs& inputs) {
 		return false;
 	}
 	return true;
+#elif defined(KYTY_FRAMEGEN_NGX)
+	if (!g_upscale_ready || g_dlss == nullptr) return false;
+	// (The renderer thread, or the recording worker replaying in order: one at a time.)
+	static vk::Extent2D created_render {}, created_output {};
+	static bool         created = false, failed = false;
+	static uint32_t     reports = 0;
+	if (failed) return false; // (the stretch, every frame, without asking NGX again)
+	if (!created || created_render != inputs.color.extent || created_output != inputs.output.extent) {
+		// The mode by the input's share of the output's height, as Windows' (Streamline) way: PS5 Pro's 1512 of 2160 and
+		// 1440 are quality, 1080 performance, the output's own DLAA.
+		const double    share = static_cast<double>(inputs.color.extent.height) / inputs.output.extent.height;
+		KytyDlssFeature feature {};
+		feature.input_width    = inputs.color.extent.width;
+		feature.input_height   = inputs.color.extent.height;
+		feature.output_width   = inputs.output.extent.width;
+		feature.output_height  = inputs.output.extent.height;
+		feature.quality        = share >= 0.95 ? 0 : share >= 0.62 ? 1 : share >= 0.55 ? 2 : share >= 0.45 ? 3 : 4;
+		feature.depth_inverted = 1;
+		feature.hdr            = 1; // (the game's linear HDR scene, before its tone mapping; automatic exposure)
+		// KYTY_DLSS_PRESET=<letter> (a test): that DLSS model for every mode instead of the mode's default.
+		if (const char* preset = std::getenv("KYTY_DLSS_PRESET"); preset != nullptr && *preset >= 'A' && *preset <= 'O')
+			feature.preset = static_cast<uint32_t>(*preset - 'A' + 1);
+		if (g_dlss->CreateFeature(static_cast<VkCommandBuffer>(command), &feature) == 0) {
+			std::printf("DLSS super resolution: NGX did not make the feature for %ux%u -> %ux%u (the stretch instead)\n",
+			            feature.input_width, feature.input_height, feature.output_width, feature.output_height);
+			std::fflush(stdout);
+			failed = true;
+			return false;
+		}
+		static constexpr const char* Modes[] {"DLAA", "Quality", "Balanced", "Performance", "Ultra Performance"};
+		std::printf("DLSS super resolution: %ux%u -> %ux%u, %s (NVIDIA NGX)\n", feature.input_width, feature.input_height,
+		            feature.output_width, feature.output_height, Modes[feature.quality]);
+		std::fflush(stdout);
+		created        = true;
+		created_render = inputs.color.extent;
+		created_output = inputs.output.extent;
+	}
+	static auto last = std::chrono::steady_clock::now();
+	const auto  now  = std::chrono::steady_clock::now();
+	const float frame_ms =
+	    std::clamp(std::chrono::duration<float, std::milli>(now - last).count(), 0.0f, 100.0f);
+	last = now;
+
+	KytyDlssEvaluate evaluate {};
+	evaluate.color  = BridgeImage(inputs.color, vk::ImageAspectFlagBits::eColor);
+	evaluate.depth  = BridgeImage(inputs.depth, IsDepthFormat(inputs.depth.format) ? vk::ImageAspectFlagBits::eDepth
+	                                                                               : vk::ImageAspectFlagBits::eColor);
+	evaluate.motion = BridgeImage(inputs.motion, vk::ImageAspectFlagBits::eColor);
+	evaluate.output = BridgeImage(inputs.output, vk::ImageAspectFlagBits::eColor);
+	evaluate.jitter_x   = inputs.jitter_x; // (render pixels, as NGX takes them)
+	evaluate.jitter_y   = inputs.jitter_y;
+	evaluate.mv_scale_x = inputs.motion_scale_x; // (the game's vectors to render pixels, NGX's units)
+	evaluate.mv_scale_y = inputs.motion_scale_y;
+	evaluate.reset      = inputs.reset ? 1 : 0;
+	evaluate.frame_ms   = frame_ms;
+	// KYTY_DLSS_SHARPNESS=0..1 (a test): NGX's own sharpening of the output.
+	static const float sharpness = [] {
+		const char* value = std::getenv("KYTY_DLSS_SHARPNESS");
+		return value != nullptr ? std::clamp(static_cast<float>(std::atof(value)), 0.0f, 1.0f) : 0.0f;
+	}();
+	evaluate.sharpness = sharpness;
+	// (KYTY_SR_LOG: the first two evaluations' images and constants.)
+	static const bool describe = std::getenv("KYTY_SR_LOG") != nullptr;
+	if (describe && reports < 2) {
+		++reports;
+		const std::pair<const char*, const UpscaleImage*> images[] {
+		    {"color", &inputs.color}, {"depth", &inputs.depth}, {"motion", &inputs.motion}, {"output", &inputs.output}};
+		for (const auto& [name, image]: images) {
+			std::printf("DLSS super resolution: %s image %p view %p layout %d format %d %ux%u level %u layer %u\n", name,
+			            static_cast<void*>(static_cast<VkImage>(image->image)),
+			            static_cast<void*>(static_cast<VkImageView>(image->view)), static_cast<int>(image->layout),
+			            static_cast<int>(image->format), image->extent.width, image->extent.height, image->base_level,
+			            image->base_layer);
+		}
+		std::printf("DLSS super resolution: jitter %g %g, motion scale %g %g, reset %d, %.2f ms\n", inputs.jitter_x,
+		            inputs.jitter_y, inputs.motion_scale_x, inputs.motion_scale_y, inputs.reset ? 1 : 0, frame_ms);
+		std::fflush(stdout);
+	}
+	// The depth in the layout NGX samples it in, for the evaluation only.
+	const bool depth_moved =
+	    IsDepthFormat(inputs.depth.format) && inputs.depth.layout != vk::ImageLayout::eShaderReadOnlyOptimal;
+	if (depth_moved)
+		DepthLayout(command, inputs.depth, inputs.depth.layout, vk::ImageLayout::eShaderReadOnlyOptimal, dispatch);
+	const bool done = g_dlss->Evaluate(static_cast<VkCommandBuffer>(command), &evaluate) != 0;
+	if (depth_moved)
+		DepthLayout(command, inputs.depth, vk::ImageLayout::eShaderReadOnlyOptimal, inputs.depth.layout, dispatch);
+	if (!done) {
+		// (As the Streamline way, issue #87: NGX refusing its evaluations three times gives DLSS up for good, the game's
+		// image stretched from then on.)
+		static uint32_t failures = 0;
+		if (++failures >= 3) {
+			failed = true;
+			std::printf("DLSS super resolution: NGX refused it %u times: the game's image is upscaled without it from here "
+			            "on\n",
+			            failures);
+		} else {
+			std::printf("DLSS super resolution: NGX's evaluation failed (the stretch for this frame)\n");
+		}
+		std::fflush(stdout);
+	}
+	return done;
 #else
 	(void)command;
 	(void)inputs;

@@ -16,6 +16,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <vector>
 
 namespace Libs::Graphics {
 class CommandBuffer;
@@ -83,6 +84,12 @@ void Initialize();
 // A refused device's advice when this process runs without bottom-up ASLR (issue #45: forcing it on for the emulator in
 // Windows' Exploit protection let the driver make the device); empty otherwise.
 [[nodiscard]] std::string RefusedDeviceAdvice();
+// Linux (KYTY_UPSCALER=dlss through NVIDIA's NGX, the bridge libkyty_dlss.so, kyty-dlss-bridge.h): the Vulkan extensions
+// NGX needs, added to `extensions` before the instance and before the device are made (DLSS off when `available` lacks
+// one). Elsewhere, and without the bridge, nothing.
+void AddInstanceExtensions(const std::vector<vk::ExtensionProperties>& available, std::vector<const char*>& extensions);
+void AddDeviceExtensions(vk::Instance instance, vk::PhysicalDevice physical_device,
+                         const std::vector<vk::ExtensionProperties>& available, std::vector<const char*>& extensions);
 // After the device exists: checks that DLSS-G is available on it.
 void OnDevice(vk::Instance instance, vk::PhysicalDevice physical_device, vk::Device device);
 // Right after the dispatcher is loaded for the device (before the recording layer copies it):
@@ -191,6 +198,7 @@ struct UpscaleImage {
 	vk::Format          format = vk::Format::eUndefined;
 	vk::Extent2D        extent {};
 	vk::ImageUsageFlags usage {};
+	uint32_t            base_level = 0, base_layer = 0; // the subresource the view shows
 };
 struct UpscaleInputs {
 	UpscaleImage color, depth, motion, output; // color, depth and motion at the render size
@@ -202,8 +210,10 @@ struct UpscaleInputs {
 };
 // Streamline offers DLSS super resolution on this device.
 [[nodiscard]] bool UpscalerReady();
-// Records DLSS into `command` (outside a render pass; the images in their `layout`s): false when it could not.
-[[nodiscard]] bool Upscale(vk::CommandBuffer command, const UpscaleInputs& inputs);
+// Records DLSS into `command` (outside a render pass; the images in their `layout`s, left so): false when it could not.
+// `dispatch` records the commands DLSS needs around it (the recording worker's when it replays).
+[[nodiscard]] bool Upscale(vk::CommandBuffer command, const UpscaleInputs& inputs,
+                           const vk::detail::DispatchLoaderDynamic& dispatch = VULKAN_HPP_DEFAULT_DISPATCHER);
 
 } // namespace FrameGen
 } // namespace Libs::Graphics
