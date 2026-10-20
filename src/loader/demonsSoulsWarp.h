@@ -46,7 +46,8 @@ double Glide(float x, float y, float z, float speed);
 bool QueueCommand(std::string_view text);
 // Live `gamekill RADIUS` (01.007.000, automated tours): the characters but the player within RADIUS m of it that still
 // have HP die the way +cp11_allSuicideExceptPlayer kills every character (the game's suicide of a ChrIns), on the
-// game's pad-reading thread as a queued command. False: another build (nothing queued).
+// game's pad-reading thread as a queued command; a boss of 1000 HP or more within 40 m widens it to 60 m (a boss dies with
+// its parts). False: another build (nothing queued).
 bool QueueKill(float radius);
 // The pad read (libs/controller.cpp): runs a queued command (and a queued kill).
 void RunQueuedCommand();

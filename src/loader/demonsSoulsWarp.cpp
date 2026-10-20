@@ -307,7 +307,13 @@ std::atomic<float> g_kill_radius {0.0f}; // (0: none queued)
 
 bool FindPlayer(uint64_t* ctrl, uint64_t* body);
 
-// The pad-reading thread: the characters within `radius` of the player killed (RunQueuedCommand).
+// The pad-reading thread: the characters within `radius` of the player killed (RunQueuedCommand). A character of a boss's
+// strength (KillBossHp) within KillBossNear widens it to KillGroup: a boss dies with its parts. Phalanx's 38 blobs and core
+// in one kill were fine; 28 of the blobs without the core made a job worker call a null virtual a minute later (the
+// group's logic over members dead the way the game never kills them).
+constexpr int32_t KillBossHp   = 1000;
+constexpr float   KillBossNear = 40.0f;
+constexpr float   KillGroup    = 60.0f;
 void RunKill(float radius) {
 	uint64_t man = 0, player = 0, ctrl = 0, body = 0, array = 0;
 	float    at[3] {};
@@ -317,8 +323,13 @@ void RunKill(float radius) {
 		return;
 	}
 	using Suicide = KYTY_SYSV_ABI void (*)(uint64_t chr, uint32_t a, uint32_t b, uint32_t c);
-	int32_t     count = 0, alive = 0, killed = 0;
-	std::string list;
+	struct Living {
+		uint64_t chr      = 0;
+		int32_t  hp       = 0;
+		float    distance = 0;
+	};
+	std::vector<Living> living;
+	int32_t             count = 0;
 	for (int32_t i = 0; Peek(man + 0x24, &count) && i < count; i++) {
 		uint64_t chr = 0, chr_ctrl = 0, chr_body = 0;
 		int32_t  hp  = 0;
@@ -326,18 +337,24 @@ void RunKill(float radius) {
 		if (!Peek(array + 8u * static_cast<uint64_t>(i), &chr) || chr == 0 || chr == player || !Peek(chr + 0x710, &hp) ||
 		    hp <= 0 || !Peek(chr + 0x38, &chr_ctrl) || !Peek(chr_ctrl + 0x20, &chr_body) || !Peek(chr_body + 0x20, &pos))
 			continue;
-		alive++;
 		const float dx = pos[0] - at[0], dy = pos[1] - at[1], dz = pos[2] - at[2];
-		const float distance = std::sqrt(dx * dx + dy * dy + dz * dz);
-		if (!(distance <= radius)) continue;
-		reinterpret_cast<Suicide>(KillCharacter)(chr, 0, 0, 0);
+		living.push_back({chr, hp, std::sqrt(dx * dx + dy * dy + dz * dz)});
+	}
+	const bool boss = std::any_of(living.begin(), living.end(),
+	                              [](const Living& c) { return c.hp >= KillBossHp && c.distance <= KillBossNear; });
+	if (boss) radius = std::max(radius, KillGroup);
+	int32_t     killed = 0;
+	std::string list;
+	for (const auto& c: living) {
+		if (!(c.distance <= radius)) continue;
+		reinterpret_cast<Suicide>(KillCharacter)(c.chr, 0, 0, 0);
 		killed++;
 		char part[64];
-		std::snprintf(part, sizeof(part), " %.1fm/%dhp", distance, hp);
+		std::snprintf(part, sizeof(part), " %.1fm/%dhp", c.distance, c.hp);
 		list += part;
 	}
-	std::printf("Game kill: %d of %d living characters within %.1f m of the player (%.1f %.1f %.1f)%s\n", killed, alive,
-	            radius, at[0], at[1], at[2], list.c_str());
+	std::printf("Game kill: %d of %zu living characters within %.1f m of the player (%.1f %.1f %.1f)%s%s\n", killed,
+	            living.size(), radius, at[0], at[1], at[2], boss ? " (a boss near: its group too)" : "", list.c_str());
 	std::fflush(stdout);
 }
 
