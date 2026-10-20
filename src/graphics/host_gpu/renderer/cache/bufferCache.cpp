@@ -1673,8 +1673,10 @@ void BufferCache::SplitUnmappedBuffers(uint64_t vaddr, uint64_t size) {
 		const auto& buffer = m_slot_buffers[it->second];
 		if (buffer.CpuAddress() + buffer.Size() > end) candidates.push_back(it->second);
 	}
-	// Mapped runs closer than a stream leap stay one buffer (a join would make them one again).
-	constexpr uint64_t Gap = CACHING_PAGESIZE * 128;
+	// Mapped runs closer than the game's 64 KiB pages stay one buffer. (A stream leap no longer joins them again over the
+	// gap: ResolveOverlaps. With 2 MiB here a pool mapping 256 KiB of each MiB stayed whole: 1-1 after two world trips,
+	// 349 MiB of video memory held for unmapped bytes.)
+	constexpr uint64_t Gap = CACHING_PAGESIZE * 4;
 	for (const auto id: candidates) {
 		const auto& old = m_slot_buffers[id];
 		if (old.is_deleted) continue;
@@ -1908,6 +1910,29 @@ BufferCache::OverlapResult BufferCache::ResolveOverlaps(uint64_t vaddr, uint64_t
 		}
 		return first;
 	};
+	// A leap covers memory the game maps only (its run from the edge): over an unmapped gap it joined the buffers of
+	// pieces mapped apart into one that held the gaps in video memory too (1-1 after two world trips: a pool mapping 256
+	// KiB of each MiB in one buffer of 369 MiB, 236 MiB of it unmapped; 349 MiB in 29 buffers).
+	const auto leap_right = [&](uint64_t from, uint64_t to) {
+		if (m_resources == nullptr) return to;
+		RangeSet mapped;
+		m_resources->MappedRanges(from, to - from, mapped);
+		uint64_t reach = from;
+		mapped.ForEach([&](uint64_t a, uint64_t b) {
+			if (a <= reach) reach = std::max(reach, std::min(b, to));
+		});
+		return reach & ~(CACHING_PAGESIZE - 1);
+	};
+	const auto leap_left = [&](uint64_t from, uint64_t to) {
+		if (m_resources == nullptr) return from;
+		RangeSet mapped;
+		m_resources->MappedRanges(from, to - from, mapped);
+		uint64_t reach = to;
+		std::vector<std::pair<uint64_t, uint64_t>> runs;
+		mapped.ForEach([&](uint64_t a, uint64_t b) { runs.emplace_back(a, b); });
+		for (auto it = runs.rbegin(); it != runs.rend() && it->second >= reach; ++it) reach = std::min(reach, std::max(it->first, from));
+		return (reach + CACHING_PAGESIZE - 1) & ~(CACHING_PAGESIZE - 1);
+	};
 	auto first           = find_first(begin);
 	auto last            = first;
 	int  stream_score    = 0;
@@ -1925,12 +1950,12 @@ BufferCache::OverlapResult BufferCache::ResolveOverlaps(uint64_t vaddr, uint64_t
 			// Fix the shadPS4 bug that reserves space opposite to the incoming stream's growth.
 			// The old buffer extending left of the request predicts growth to the right, and vice versa.
 			if (expands_left) {
-				end += std::min(StreamLeapSize, PageTable::kAddressSpaceSize - end);
+				end = std::max(end, leap_right(end, end + std::min(StreamLeapSize, PageTable::kAddressSpaceSize - end)));
 			}
 			if (expands_right) {
 				const auto minimum = CACHING_PAGESIZE * 2;
 				if (begin > minimum) {
-					begin -= std::min(StreamLeapSize, begin - minimum);
+					begin = std::min(begin, leap_left(begin - std::min(StreamLeapSize, begin - minimum), begin));
 				}
 				first = find_first(begin);
 				begin = std::min(begin, first->first);
