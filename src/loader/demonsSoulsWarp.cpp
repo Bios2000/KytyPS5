@@ -21,6 +21,7 @@
 #include <mutex>
 #include <optional>
 #include <thread>
+#include <unordered_set>
 
 namespace Loader::DemonsSoulsWarp {
 
@@ -304,6 +305,16 @@ bool               IsKillBuild() {
 	       std::memcmp(array, Array, sizeof(Array)) == 0;
 }
 std::atomic<float> g_kill_radius {0.0f}; // (0: none queued)
+std::atomic<int>   g_kill_mode {0};        // KillMode
+
+// 01.007.000's DeathBegin (0x900330940): the ChrIns state machine to "DeathBegin" (0x900325100 (chr, name, 1)), what a
+// character's normal death enters; an event-script command case (0x90039e9d0, by "player_use_item") calls it as it is.
+constexpr uint64_t DeathBegin = 0x900330940;
+bool               IsDeathBuild() {
+	static constexpr uint8_t Code[] = {0x48, 0x8d, 0x35, 0xc2, 0xbb, 0x12, 0x02, 0xba, 0x01, 0x00, 0x00, 0x00, 0xe9};
+	uint8_t                  code[sizeof(Code)] {};
+	return Peek(DeathBegin, &code) && std::memcmp(code, Code, sizeof(Code)) == 0;
+}
 
 bool FindPlayer(uint64_t* ctrl, uint64_t* body);
 
@@ -314,7 +325,7 @@ bool FindPlayer(uint64_t* ctrl, uint64_t* body);
 constexpr int32_t KillBossHp   = 1000;
 constexpr float   KillBossNear = 40.0f;
 constexpr float   KillGroup    = 60.0f;
-void RunKill(float radius) {
+void RunKill(float radius, KillMode mode) {
 	uint64_t man = 0, player = 0, ctrl = 0, body = 0, array = 0;
 	float    at[3] {};
 	if (!Peek(0x9027cf378, &man) || man == 0 || !Peek(man + 0x258, &player) || !FindPlayer(&ctrl, &body) ||
@@ -347,7 +358,15 @@ void RunKill(float radius) {
 	std::string list;
 	for (const auto& c: living) {
 		if (!(c.distance <= radius)) continue;
-		reinterpret_cast<Suicide>(KillCharacter)(c.chr, 0, 0, 0);
+		// (The suicide's death state, the debug command's too, left the dead characters' collision shapes freed under
+		// Havok: a job worker's cast crashed or hung once the player moved, 3 of 3 tries. HP 0 alone kills nothing: the
+		// game notices a death where it deals damage.)
+		if (mode == KillMode::Suicide) {
+			reinterpret_cast<Suicide>(KillCharacter)(c.chr, 0, 0, 0);
+		} else {
+			*reinterpret_cast<volatile int32_t*>(c.chr + 0x710) = 0;
+			if (mode == KillMode::Death) reinterpret_cast<KYTY_SYSV_ABI void (*)(uint64_t)>(DeathBegin)(c.chr);
+		}
 		killed++;
 		char part[64];
 		std::snprintf(part, sizeof(part), " %.1fm/%dhp", c.distance, c.hp);
@@ -423,9 +442,10 @@ bool QueueCommand(std::string_view text) {
 #endif
 }
 
-bool QueueKill(float radius) {
+bool QueueKill(float radius, KillMode mode) {
 #if defined(_WIN32)
-	if (!(radius > 0) || !IsPlayerBuild() || !IsKillBuild()) return false;
+	if (!(radius > 0) || !IsPlayerBuild() || !IsKillBuild() || (mode == KillMode::Death && !IsDeathBuild())) return false;
+	g_kill_mode.store(static_cast<int>(mode), std::memory_order_relaxed);
 	g_kill_radius.store(radius, std::memory_order_release);
 	return true;
 #else
@@ -436,7 +456,9 @@ bool QueueKill(float radius) {
 
 void RunQueuedCommand() {
 #if defined(_WIN32)
-	if (g_kill_radius.load(std::memory_order_relaxed) > 0) RunKill(g_kill_radius.exchange(0.0f, std::memory_order_acq_rel));
+	if (g_kill_radius.load(std::memory_order_relaxed) > 0)
+		RunKill(g_kill_radius.exchange(0.0f, std::memory_order_acq_rel),
+		        static_cast<KillMode>(g_kill_mode.load(std::memory_order_relaxed)));
 	if (!g_command_pending.load(std::memory_order_acquire)) return;
 	std::string text;
 	{
@@ -453,6 +475,169 @@ void RunQueuedCommand() {
 	std::printf("Game command: %s\n", text.c_str());
 	std::fflush(stdout);
 	(void)reinterpret_cast<Execute>(CommandEntry)(console, text.c_str());
+#endif
+}
+
+#if defined(_WIN32)
+} // namespace Loader::DemonsSoulsWarp
+namespace Libs::Controller {
+void SetScriptedInput(int left_x, int left_y, int right_x, int right_y, uint32_t buttons, double seconds);
+} // namespace Libs::Controller
+namespace Loader::DemonsSoulsWarp {
+#endif
+
+std::string Strike(float radius) {
+#if defined(_WIN32)
+	if (!(radius > 0) || !IsPlayerBuild() || !IsKillBuild()) return "not this build";
+	// cp11_characters_playerExterminate (01.007.000, live byte): the player's hits kill. The normal death a hit makes:
+	// the game's events (a boss's "DEMON VANQUISHED"), souls, drops, ragdolls.
+	*reinterpret_cast<volatile uint8_t*>(0x9027cbb70) = 1;
+	uint64_t man = 0, player = 0, ctrl = 0, body = 0, array = 0;
+	float    at[3] {};
+	if (!Peek(0x9027cf378, &man) || man == 0 || !Peek(man + 0x258, &player) || !FindPlayer(&ctrl, &body) ||
+	    !Peek(body + 0x20, &at) || !Peek(man + 0x18, &array))
+		return "no player";
+	struct Target {
+		uint64_t chr      = 0;
+		float    distance = 0;
+	};
+	const auto place = [](uint64_t chr, float* pos, int32_t* hp) {
+		uint64_t chr_ctrl = 0, chr_body = 0;
+		return Peek(chr + 0x710, hp) && Peek(chr + 0x38, &chr_ctrl) && Peek(chr_ctrl + 0x20, &chr_body) &&
+		       Peek(chr_body + 0x20, reinterpret_cast<float (*)[3]>(pos));
+	};
+	std::vector<Target> targets;
+	int32_t             count = 0;
+	for (int32_t i = 0; Peek(man + 0x24, &count) && i < count; i++) {
+		uint64_t chr = 0;
+		int32_t  hp  = 0;
+		float    pos[3] {};
+		if (!Peek(array + 8u * static_cast<uint64_t>(i), &chr) || chr == 0 || chr == player || !place(chr, pos, &hp) || hp <= 0)
+			continue;
+		const float dx = pos[0] - at[0], dy = pos[1] - at[1], dz = pos[2] - at[2];
+		const float distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+		if (distance <= radius) targets.push_back({chr, distance});
+	}
+	std::sort(targets.begin(), targets.end(), [](const Target& a, const Target& b) { return a.distance < b.distance; });
+	const auto start  = std::chrono::steady_clock::now();
+	int        killed = 0, strikes = 0;
+	for (const auto& target: targets) {
+		for (int attempt = 0; attempt < 3; attempt++) {
+			int32_t hp = 0;
+			float   pos[3] {}, me[3] {};
+			if (!place(target.chr, pos, &hp) || hp <= 0 || !FindPlayer(&ctrl, &body) || !Peek(body + 0x20, &me)) break;
+			// 1.3 m before it on the line from the player, facing it (the saves' yaw: atan2(-dx, -dz)).
+			float dx = pos[0] - me[0], dz = pos[2] - me[2];
+			float length = std::sqrt(dx * dx + dz * dz);
+			if (length < 0.01f) dx = 0, dz = 1, length = 1;
+			const float stand[3] = {pos[0] - dx / length * 1.3f, pos[1] + 0.1f, pos[2] - dz / length * 1.3f};
+			WarpPlayer(stand, std::atan2(-(pos[0] - stand[0]), -(pos[2] - stand[2])));
+			std::this_thread::sleep_for(std::chrono::milliseconds(150));
+			Libs::Controller::SetScriptedInput(-1, -1, -1, -1, 0x800, 0.12); // R1: the right hand's light attack
+			strikes++;
+			std::this_thread::sleep_for(std::chrono::milliseconds(900));
+		}
+		int32_t hp = 0;
+		float   pos[3] {};
+		if (place(target.chr, pos, &hp) && hp <= 0) killed++;
+	}
+	char report[160];
+	std::snprintf(report, sizeof(report), "killed %d of %zu within %.1f m (%d strikes, %.1f s)", killed, targets.size(), radius,
+	              strikes, std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
+	std::printf("Game strike: %s\n", report);
+	std::fflush(stdout);
+	return report;
+#else
+	(void)radius;
+	return "not this build";
+#endif
+}
+
+std::string Sweep(double seconds, float radius) {
+#if defined(_WIN32)
+	if (!(seconds > 0) || !(radius > 0) || !IsPlayerBuild() || !IsKillBuild()) return "not this build";
+	const auto start    = std::chrono::steady_clock::now();
+	const auto deadline = start + std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(seconds));
+	const auto elapsed  = [&] { return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(); };
+	const auto place    = [](uint64_t chr, float* pos, int32_t* hp) {
+        uint64_t chr_ctrl = 0, chr_body = 0;
+        return Peek(chr + 0x710, hp) && Peek(chr + 0x38, &chr_ctrl) && Peek(chr_ctrl + 0x20, &chr_body) &&
+               Peek(chr_body + 0x20, reinterpret_cast<float (*)[3]>(pos));
+	};
+	std::unordered_set<uint64_t> skipped;
+	int                          killed = 0, strikes = 0, waits = 0;
+	while (std::chrono::steady_clock::now() < deadline) {
+		uint64_t man = 0, player = 0, ctrl = 0, body = 0, array = 0;
+		float    at[3] {};
+		if (!Peek(0x9027cf378, &man) || man == 0 || !Peek(man + 0x258, &player) || player == 0 || !FindPlayer(&ctrl, &body) ||
+		    !Peek(body + 0x20, &at) || !Peek(man + 0x18, &array)) {
+			// (A level still loading: no player yet.)
+			waits++;
+			std::this_thread::sleep_for(std::chrono::milliseconds(250));
+			continue;
+		}
+		// The player's hits kill (cp11_characters_playerExterminate), no damage taken, no death (event bits 0x50: a fall
+		// into a pit as well); again each time, a level load resets them.
+		*reinterpret_cast<volatile uint8_t*>(0x9027cbb70) = 1;
+		*reinterpret_cast<volatile uint8_t*>(0x9027cbd50) = 1;
+		uint32_t bits = 0;
+		if (Peek(player + 0x580, &bits)) *reinterpret_cast<volatile uint32_t*>(player + 0x580) = bits | 0x50u;
+		// The nearest living character not given up on.
+		uint64_t best = 0;
+		float    best_distance = radius, best_pos[3] {};
+		int32_t  best_hp = 0, count = 0;
+		for (int32_t i = 0; Peek(man + 0x24, &count) && i < count; i++) {
+			uint64_t chr = 0;
+			int32_t  hp  = 0;
+			float    pos[3] {};
+			if (!Peek(array + 8u * static_cast<uint64_t>(i), &chr) || chr == 0 || chr == player || skipped.count(chr) != 0 ||
+			    !place(chr, pos, &hp) || hp <= 0)
+				continue;
+			const float dx = pos[0] - at[0], dy = pos[1] - at[1], dz = pos[2] - at[2];
+			const float distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+			if (distance < best_distance) best = chr, best_distance = distance, best_hp = hp, std::copy_n(pos, 3, best_pos);
+		}
+		if (best == 0) break;
+		// Three hits at most, a boss's strength (1000 HP and more) eight (user 10-20: "bosses may need more hits"), each
+		// from another side of it (a quarter turn on: a wall or a ledge in the way of one).
+		bool      dead     = false;
+		const int attempts = best_hp >= 1000 ? 8 : 3;
+		for (int attempt = 0; attempt < attempts && !dead; attempt++) {
+			int32_t hp = 0;
+			float   pos[3] {}, me[3] {};
+			if (!place(best, pos, &hp) || hp <= 0 || !FindPlayer(&ctrl, &body) || !Peek(body + 0x20, &me)) break;
+			// 1.3 m before it on the line from the player (turned by the attempt), facing it (the saves' yaw: atan2(-dx, -dz)).
+			float dx = pos[0] - me[0], dz = pos[2] - me[2];
+			float length = std::sqrt(dx * dx + dz * dz);
+			if (length < 0.01f) dx = 0, dz = 1, length = 1;
+			const float turn = 1.5707963f * static_cast<float>(attempt);
+			const float ux = dx / length, uz = dz / length;
+			const float rx = ux * std::cos(turn) - uz * std::sin(turn), rz = ux * std::sin(turn) + uz * std::cos(turn);
+			const float stand[3] = {pos[0] - rx * 1.3f, pos[1] + 0.1f, pos[2] - rz * 1.3f};
+			WarpPlayer(stand, std::atan2(-(pos[0] - stand[0]), -(pos[2] - stand[2])));
+			std::this_thread::sleep_for(std::chrono::milliseconds(120));
+			Libs::Controller::SetScriptedInput(-1, -1, -1, -1, 0x800, 0.12); // R1: the right hand's light attack
+			strikes++;
+			std::this_thread::sleep_for(std::chrono::milliseconds(550));
+			dead = place(best, pos, &hp) && hp <= 0;
+		}
+		if (dead) {
+			killed++;
+		} else {
+			skipped.insert(best);
+		}
+		std::printf("Game sweep: %s %.1f %.1f %.1f hp %d %.0f m t=%.1f s\n", dead ? "killed" : "skipped", best_pos[0], best_pos[1],
+		            best_pos[2], best_hp, best_distance, elapsed());
+	}
+	char report[200];
+	std::snprintf(report, sizeof(report), "killed %d, skipped %zu (%d strikes, %.1f s%s)", killed, skipped.size(), strikes,
+	              elapsed(), std::chrono::steady_clock::now() >= deadline ? ", time up" : "");
+	std::printf("Game sweep: done, %s\n", report);
+	std::fflush(stdout);
+	return report;
+#else
+	(void)seconds, (void)radius;
+	return "not this build";
 #endif
 }
 
