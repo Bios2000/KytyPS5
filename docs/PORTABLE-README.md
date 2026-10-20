@@ -293,6 +293,17 @@ The keyboard has no L2 / R2 by default: use a gamepad when you need them.
 | `launcher-settings.json` | The launcher's settings |
 | `_DebugSnapshots` | The F9 debug snapshots (picture, position, log), to attach to an issue |
 
+## Updating to a newer package
+
+Close the game and the launcher, then extract the new zip over the old folder and let it replace the
+files. The zip holds only the program files (the emulator, its DLLs, the scripts, `launch.json`, this
+README, the licenses and the shader hints under `tools`). Your saves, shader caches, logs and settings
+are in files it does not have (`_SaveData`, `_PipelineCache`, `logs`, `game-path.txt`,
+`launcher-settings.json`, the `seeds-...` files), so they stay as they are. The launcher asks for a new
+precompile only when the new version needs one, and that run compiles only what is new. If you edited
+`launch.json` yourself, make the edit again in the new one. A copy of `_SaveData` before an update never
+hurts.
+
 ## Known issues
 
 - It crashes now and then.
