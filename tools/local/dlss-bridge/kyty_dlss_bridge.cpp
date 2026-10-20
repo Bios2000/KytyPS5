@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -57,6 +58,9 @@ struct State {
 	// The extensions of both features, without duplicates.
 	std::vector<VkExtensionProperties> instance_extensions, device_extensions;
 	std::vector<Retired>               retired;
+	// DLSS runs on the renderer thread (or its recording worker), frame generation on the present thread: one NGX
+	// call at a time.
+	std::mutex                         mutex;
 	uint64_t                           evaluations {};
 	VkDevice                           device {};
 	bool                               configured {};
@@ -254,6 +258,7 @@ void Retire(NVSDK_NGX_Handle*& handle, NVSDK_NGX_Parameter*& parameters) {
 }
 
 int32_t CreateFeature(VkCommandBuffer command, const KytyDlssFeature* desc) {
+	const std::lock_guard lock(state.mutex);
 	if (!state.initialized || state.capabilities == nullptr || desc == nullptr) return 0;
 	Retire(state.feature, state.parameters);
 	if (!Check("Parameter allocation", NVSDK_NGX_VULKAN_AllocateParameters(&state.parameters))) return 0;
@@ -292,6 +297,7 @@ NVSDK_NGX_Resource_VK Wrap(const KytyDlssImage& image, bool writable) {
 }
 
 int32_t Evaluate(VkCommandBuffer command, const KytyDlssEvaluate* evaluate) {
+	const std::lock_guard lock(state.mutex);
 	if (state.feature == nullptr || state.parameters == nullptr || evaluate == nullptr) return 0;
 	++state.evaluations;
 	Collect(false);
@@ -323,6 +329,7 @@ int32_t FrameGenMaxCount() {
 }
 
 int32_t FrameGenCreate(VkCommandBuffer command, const KytyDlssgFeature* desc) {
+	const std::lock_guard lock(state.mutex);
 	if (!state.initialized || state.fg_max_count < 1 || desc == nullptr) return 0;
 	Retire(state.fg_feature, state.fg_parameters);
 	if (!Check("Frame generation parameter allocation", NVSDK_NGX_VULKAN_AllocateParameters(&state.fg_parameters))) return 0;
@@ -359,6 +366,7 @@ void Identity(float (&m)[4][4]) {
 }
 
 int32_t FrameGenEvaluate(VkCommandBuffer command, const KytyDlssgEvaluate* evaluate) {
+	const std::lock_guard lock(state.mutex);
 	if (state.fg_feature == nullptr || state.fg_parameters == nullptr || evaluate == nullptr) return 0;
 	if (evaluate->multi_frame_index == 1) {
 		++state.evaluations;
@@ -421,6 +429,7 @@ int32_t FrameGenEvaluate(VkCommandBuffer command, const KytyDlssgEvaluate* evalu
 }
 
 void Shutdown() {
+	const std::lock_guard lock(state.mutex);
 	Retire(state.fg_feature, state.fg_parameters);
 	Retire(state.feature, state.parameters);
 	Collect(true);

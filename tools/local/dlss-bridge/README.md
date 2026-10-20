@@ -44,5 +44,14 @@ The log says `DLSS: bridge ... loaded`, `DLSS super resolution: ready (NVIDIA NG
 | `KYTY_DLSS_NGX_LOG=1` | NGX's own verbose log |
 | `KYTY_SR_LOG=1` | the first evaluations' images and constants |
 
-Frame generation (`KYTY_FRAMEGEN`) is not on Linux yet: the bridge makes the frames (`FrameGenEvaluate`), but the
-presenter does not show them the way Streamline's present does on Windows.
+## Frame generation
+
+`KYTY_FRAMEGEN=<n>` (with or without `KYTY_UPSCALER=dlss`): NGX's DLSS-G makes `n` frames between two of the game's
+(1: 2x; up to 3, 4x, on GeForce RTX 50), and the presenter shows them before the game's frame, evenly spaced over the
+game's frame time (`PresentGenerated`, swapchain.cpp: on Windows Streamline does this inside the present). The log says
+`Frame generation: DLSS-G ready (NVIDIA NGX, 1 generated frame(s) per frame, 2x)`.
+
+The generated frames are spaced by the game's frame time, so they are as even as the game's flips: at the console's
+60 Hz vblank a game between 30 and 60 fps flips after one vblank or two by turns (16.7 or 33.3 ms), and so do the frames
+in between. `KYTY_VBLANK=240` (run_ds.sh adds the game's `gameMinDeltaTime` above 60 Hz) lets each flip go 4.2 ms after
+it is ready instead, and the frame times follow the game's own.

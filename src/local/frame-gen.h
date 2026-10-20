@@ -215,6 +215,18 @@ struct UpscaleInputs {
 [[nodiscard]] bool Upscale(vk::CommandBuffer command, const UpscaleInputs& inputs,
                            const vk::detail::DispatchLoaderDynamic& dispatch = VULKAN_HPP_DEFAULT_DISPATCHER);
 
+// Linux (NVIDIA NGX, kyty-dlss-bridge.h): Streamline makes and shows the generated frames inside vkQueuePresentKHR on
+// Windows; here the presenter shows them itself (swapchain.cpp). True once DLSS-G is ready that way.
+[[nodiscard]] bool PresenterGenerates();
+// Present thread (PresenterGenerates): `backbuffer` is the frame finished at the swapchain's size, its UI included
+// (general layout), `region` where the game image is in it. Records into `command` the frames between the last frame
+// given and this one, into `outputs` (general layout, storage; in order), and returns how many to show before this
+// frame: none for a frame without inputs (a menu, a movie), or the first one after such frames (no frame to start from).
+[[nodiscard]] uint32_t Generate(vk::CommandBuffer command, const FrameInputs* inputs, const UpscaleImage& backbuffer,
+                                vk::Rect2D region, std::span<const UpscaleImage> outputs);
+// Present thread: the frames the last rendered frame was shown as (1 + the generated ones), for PresentedFrames.
+void NotePresented(uint32_t frames);
+
 } // namespace FrameGen
 } // namespace Libs::Graphics
 

@@ -868,13 +868,14 @@ void DlssLog(int warning, const char* message) {
 	std::fflush(stdout);
 }
 
-// Every way DLSS cannot run: the game keeps its own TAA (demonsSoulsSuperResolution.cpp).
+// Every way DLSS cannot run: the game keeps its own TAA (demonsSoulsSuperResolution.cpp), no frames are generated.
 void DlssOff(const char* why) {
-	LOGF("DLSS super resolution: off (%s)\n", why);
-	std::printf("DLSS super resolution: off (%s)\n", why);
+	LOGF("DLSS: off (%s)\n", why);
+	std::printf("DLSS: off (%s)\n", why);
 	std::fflush(stdout);
-	g_dlss    = nullptr;
-	g_upscale = false;
+	g_dlss     = nullptr;
+	g_upscale  = false;
+	g_generate = 0;
 }
 
 std::filesystem::path ExecutableFolder() {
@@ -969,6 +970,131 @@ void DepthLayout(vk::CommandBuffer command, const UpscaleImage& depth, vk::Image
 	dependency.imageMemoryBarrierCount = 1;
 	dependency.pImageMemoryBarriers    = &barrier;
 	command.pipelineBarrier2(dependency, dispatch);
+}
+
+KytyDlssImage BridgeImage(const VulkanImage& image, vk::ImageView view) {
+	KytyDlssImage out {};
+	out.image  = static_cast<VkImage>(image.image);
+	out.view   = static_cast<VkImageView>(view);
+	out.range  = {static_cast<VkImageAspectFlags>(IsDepthFormat(image.format) ? vk::ImageAspectFlagBits::eDepth
+	                                                                          : vk::ImageAspectFlagBits::eColor),
+	              0, 1, 0, 1};
+	out.format = static_cast<VkFormat>(image.format);
+	out.width  = image.extent.width;
+	out.height = image.extent.height;
+	return out;
+}
+
+// Frame generation through NGX (the presenter shows the frames, swapchain.cpp).
+bool              g_fg_created = false; // the DLSS-G feature exists for these sizes
+bool              g_fg_history = false; // the last frame given to it had inputs: the next one interpolates from it
+bool              g_fg_failed  = false;
+vk::Extent2D      g_fg_backbuffer {}, g_fg_render {};
+vk::Format        g_fg_format = vk::Format::eUndefined;
+std::atomic<bool> g_fg_discontinuity {false}; // a frame with inputs left unshown (NoteDroppedFrame)
+
+// Matrices as Streamline and NGX take them: row-major, row vectors (p' = p * M), 16 floats.
+using RowMatrix = std::array<float, 16>;
+
+RowMatrix Identity() {
+	RowMatrix m {};
+	for (uint32_t i = 0; i < 4; ++i) m[i * 4 + i] = 1.0f;
+	return m;
+}
+
+RowMatrix Transposed(const std::array<float, 16>& m) { // the game's column-vector matrix
+	RowMatrix r {};
+	for (uint32_t i = 0; i < 4; ++i)
+		for (uint32_t j = 0; j < 4; ++j) r[i * 4 + j] = m[j * 4 + i];
+	return r;
+}
+
+RowMatrix Multiply(const RowMatrix& a, const RowMatrix& b) {
+	RowMatrix r {};
+	for (uint32_t i = 0; i < 4; ++i)
+		for (uint32_t j = 0; j < 4; ++j)
+			for (uint32_t k = 0; k < 4; ++k) r[i * 4 + j] += a[i * 4 + k] * b[k * 4 + j];
+	return r;
+}
+
+bool Inverted(const RowMatrix& m, RowMatrix& out) {
+	double a[4][8] {};
+	for (uint32_t i = 0; i < 4; ++i) {
+		for (uint32_t j = 0; j < 4; ++j) a[i][j] = m[i * 4 + j];
+		a[i][4 + i] = 1.0;
+	}
+	for (uint32_t c = 0; c < 4; ++c) {
+		uint32_t pivot = c;
+		for (uint32_t r = c + 1; r < 4; ++r) {
+			if (std::fabs(a[r][c]) > std::fabs(a[pivot][c])) pivot = r;
+		}
+		if (std::fabs(a[pivot][c]) < 1e-12) return false;
+		for (uint32_t j = 0; j < 8; ++j) std::swap(a[c][j], a[pivot][j]);
+		const double scale = 1.0 / a[c][c];
+		for (uint32_t j = 0; j < 8; ++j) a[c][j] *= scale;
+		for (uint32_t r = 0; r < 4; ++r) {
+			if (r == c) continue;
+			const double f = a[r][c];
+			for (uint32_t j = 0; j < 8; ++j) a[r][j] -= f * a[c][j];
+		}
+	}
+	for (uint32_t i = 0; i < 4; ++i)
+		for (uint32_t j = 0; j < 4; ++j) out[i * 4 + j] = static_cast<float>(a[i][4 + j]);
+	return true;
+}
+
+// The game's world->clip matrix split into camera axes, position and projection terms, as the Streamline way does
+// (its Decompose): P * V with a perspective P whose w row is (0, 0, 1, 0) and whose z row is constant (reversed-Z,
+// infinite far).
+struct CameraAxes {
+	std::array<float, 3> right {}, up {}, forward {}, position {};
+	float                sx = 1.0f, sy = 1.0f, cx = 0.0f, cy = 0.0f, z_near = 0.1f;
+	bool                 valid = false;
+};
+
+CameraAxes Decompose(const std::array<float, 16>& m) {
+	CameraAxes c;
+	const auto row = [&](uint32_t i) { return std::array<double, 4> {m[i * 4], m[i * 4 + 1], m[i * 4 + 2], m[i * 4 + 3]}; };
+	const auto r0 = row(0), r1 = row(1), r2 = row(2), r3 = row(3);
+	const double flen = std::sqrt(r3[0] * r3[0] + r3[1] * r3[1] + r3[2] * r3[2]);
+	if (flen < 1e-6) return c;
+	const double f[3] {r3[0] / flen, r3[1] / flen, r3[2] / flen};
+	const double tf    = r3[3] / flen;
+	const auto   split = [&](const std::array<double, 4>& r, double& s, double& off, double axis[3], double& t) {
+		off = (r[0] * f[0] + r[1] * f[1] + r[2] * f[2]) / flen;
+		double v[3] {r[0] / flen - off * f[0], r[1] / flen - off * f[1], r[2] / flen - off * f[2]};
+		s = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+		if (s < 1e-9) return false;
+		for (int i = 0; i < 3; ++i) axis[i] = v[i] / s;
+		t = (r[3] / flen - off * tf) / s;
+		return true;
+	};
+	double sx = 0, cx = 0, sy = 0, cy = 0, x[3] {}, y[3] {}, tx = 0, ty = 0;
+	if (!split(r0, sx, cx, x, tx) || !split(r1, sy, cy, y, ty)) return c;
+	// Up = forward x right (Streamline's convention); a flipped clip y shows up as a negative sy.
+	const double up[3] {f[1] * x[2] - f[2] * x[1], f[2] * x[0] - f[0] * x[2], f[0] * x[1] - f[1] * x[0]};
+	if (up[0] * y[0] + up[1] * y[1] + up[2] * y[2] < 0) {
+		sy = -sy;
+		ty = -ty;
+	}
+	for (int i = 0; i < 3; ++i) {
+		c.right[i]   = static_cast<float>(x[i]);
+		c.up[i]      = static_cast<float>(up[i]);
+		c.forward[i] = static_cast<float>(f[i]);
+		// View translation (tx, ty, tf) = -axes . position.
+		c.position[i] = static_cast<float>(-(tx * x[i] + ty * up[i] + tf * f[i]));
+	}
+	c.sx     = static_cast<float>(sx);
+	c.sy     = static_cast<float>(sy);
+	c.cx     = static_cast<float>(cx);
+	c.cy     = static_cast<float>(cy);
+	c.z_near = static_cast<float>(r2[3] / flen);
+	c.valid  = true;
+	return c;
+}
+
+void Copy16(float (&out)[16], const RowMatrix& m) {
+	for (uint32_t i = 0; i < 16; ++i) out[i] = m[i];
 }
 
 } // namespace
@@ -1264,15 +1390,9 @@ void Initialize() {
 	     dir.string().c_str(), g_generate, g_upscale ? "asked for" : "off");
 	off.done = true;
 #elif defined(KYTY_FRAMEGEN_NGX)
-	if (g_generate > 0) {
-		// (NGX makes the frames, but the presenter does not show them yet on Linux: Streamline did that on Windows.)
-		LOGF("frame generation: not on Linux yet (KYTY_FRAMEGEN ignored)\n");
-		std::printf("Frame generation: not on Linux yet, KYTY_FRAMEGEN is ignored (DLSS super resolution: "
-		            "KYTY_UPSCALER=dlss)\n");
-		std::fflush(stdout);
-		g_generate = 0;
-	}
-	if (!g_upscale || !LoadBridge()) return;
+	// (DLSS super resolution, frame generation, or both: the bridge either way. NGX makes the frames, the presenter
+	// shows them: swapchain.cpp, PresenterGenerates.)
+	if (!LoadBridge()) return;
 	off.done = true;
 #else
 	LOGF("frame generation: this build has no Streamline support\n");
@@ -1358,17 +1478,39 @@ void OnDevice(vk::Instance instance, vk::PhysicalDevice physical_device, vk::Dev
 		std::fflush(stdout);
 	}
 #elif defined(KYTY_FRAMEGEN_NGX)
-	if (g_upscale && g_dlss != nullptr && g_dlss_device) {
+	if ((g_upscale || g_generate > 0) && g_dlss != nullptr && g_dlss_device) {
 		auto& dispatch = VULKAN_HPP_DEFAULT_DISPATCHER;
 		if (g_dlss->Initialize(static_cast<VkInstance>(instance), static_cast<VkPhysicalDevice>(physical_device),
 		                       static_cast<VkDevice>(device), dispatch.vkGetInstanceProcAddr, dispatch.vkGetDeviceProcAddr) != 0) {
-			g_upscale_ready = true;
-			std::printf("DLSS super resolution: ready (NVIDIA NGX)\n");
+			if (g_upscale) {
+				g_upscale_ready = true;
+				std::printf("DLSS super resolution: ready (NVIDIA NGX)\n");
+			}
+			if (g_generate > 0) {
+				const int most = g_dlss->FrameGenMaxCount();
+				if (most < 1) {
+					LOGF("frame generation: NGX offers no DLSS-G on this GPU or driver\n");
+					std::printf("Frame generation: not available on this GPU or driver (NVIDIA RTX 40 or newer)\n");
+					g_generate = 0;
+				} else {
+					if (g_generate > most) {
+						std::printf("Frame generation: %d generated frame(s) asked for, the GPU makes up to %d\n", g_generate, most);
+						g_generate = most;
+					}
+					g_ready = true;
+					InitializeHudless();
+					LOGF("frame generation: DLSS-G ready through NGX, %d generated frame(s) per frame\n", g_generate);
+					std::printf("Frame generation: DLSS-G ready (NVIDIA NGX, %d generated frame(s) per frame, %dx)\n",
+					            g_generate, g_generate + 1);
+				}
+			}
 		} else {
-			std::printf("DLSS super resolution: not available on this device (the game keeps its own TAA)\n");
+			std::printf("DLSS: NGX did not start on this device (the game keeps its own TAA, no frame generation)\n");
+			g_generate = 0;
 		}
 		std::fflush(stdout);
 	}
+	if (g_generate > 0 && !g_ready) g_generate = 0; // (no NGX: Requested() and the rest see it off)
 #endif
 	if (g_generate == 0 || g_fsr) {
 		return;
@@ -1650,12 +1792,16 @@ void SwapchainChanging() {
 	g_mode_on     = false;
 	g_run_with    = 0;
 	g_options_set = false; // (the next present sends its sizes again)
+#elif defined(KYTY_FRAMEGEN_NGX)
+	g_fg_history = false; // (the next frame starts DLSS-G again)
 #endif
 }
 
 void NoteDroppedFrame() {
 #ifdef KYTY_FRAMEGEN_STREAMLINE
 	g_discontinuity.store(true, std::memory_order_relaxed);
+#elif defined(KYTY_FRAMEGEN_NGX)
+	g_fg_discontinuity.store(true, std::memory_order_relaxed);
 #endif
 #ifdef KYTY_FRAMEGEN_FSR
 	g_fsr_discontinuity.store(true, std::memory_order_relaxed);
@@ -2374,6 +2520,14 @@ bool SkipsFrame(const FrameInputs* inputs) {
 #endif
 }
 
+bool PresenterGenerates() {
+#ifdef KYTY_FRAMEGEN_NGX
+	return g_ready && g_dlss != nullptr && g_generate > 0 && !g_fg_failed;
+#else
+	return false;
+#endif
+}
+
 void RecordPrepare(GraphicContext& graphics, vk::CommandBuffer command, const FrameInputs* inputs, vk::Rect2D region) {
 	(void)graphics;
 #ifdef KYTY_FRAMEGEN_FSR
@@ -2467,6 +2621,156 @@ void RecordPrepare(GraphicContext& graphics, vk::CommandBuffer command, const Fr
 	(void)FsrOk(s.api.Dispatch(&s.fg_context, &prepare.header), "prepare");
 #else
 	(void)command, (void)inputs, (void)region;
+#endif
+}
+
+void NotePresented(uint32_t frames) {
+	g_presented_frames.store(std::max(frames, 1u), std::memory_order_relaxed);
+}
+
+uint32_t Generate(vk::CommandBuffer command, const FrameInputs* inputs, const UpscaleImage& backbuffer, vk::Rect2D region,
+                  std::span<const UpscaleImage> outputs) {
+#ifdef KYTY_FRAMEGEN_NGX
+	if (!PresenterGenerates()) return 0;
+	const bool discontinuity = g_fg_discontinuity.exchange(false, std::memory_order_relaxed);
+	if (inputs == nullptr || !inputs->valid) {
+		// (Menus, movies, loading: the frame shown as it is; the next one with inputs starts DLSS-G again.)
+		g_fg_history = false;
+		return 0;
+	}
+	const auto count = static_cast<uint32_t>(std::min<size_t>(outputs.size(), static_cast<size_t>(g_generate)));
+	if (count == 0) return 0;
+	if (!g_fg_created || g_fg_backbuffer != backbuffer.extent || g_fg_format != backbuffer.format ||
+	    g_fg_render != inputs->render_extent) {
+		KytyDlssgFeature feature {};
+		feature.width         = backbuffer.extent.width;
+		feature.height        = backbuffer.extent.height;
+		feature.format        = static_cast<VkFormat>(backbuffer.format);
+		feature.render_width  = inputs->render_extent.width;
+		feature.render_height = inputs->render_extent.height;
+		if (g_dlss->FrameGenCreate(static_cast<VkCommandBuffer>(command), &feature) == 0) {
+			std::printf("Frame generation: NGX did not make DLSS-G for %ux%u (depth and motion %ux%u): off\n", feature.width,
+			            feature.height, feature.render_width, feature.render_height);
+			std::fflush(stdout);
+			g_fg_failed = true;
+			return 0;
+		}
+		std::printf("Frame generation: DLSS-G %ux%u, depth and motion %ux%u, %ux (NVIDIA NGX)\n", feature.width,
+		            feature.height, feature.render_width, feature.render_height, count + 1);
+		std::fflush(stdout);
+		g_fg_created    = true;
+		g_fg_backbuffer = backbuffer.extent;
+		g_fg_format     = backbuffer.format;
+		g_fg_render     = inputs->render_extent;
+		g_fg_history    = false;
+	}
+	// (No frame before this one with inputs, or one left unshown in between: this one starts DLSS-G's history and its
+	// generated frames are not shown.)
+	const bool reset = !g_fg_history || discontinuity;
+
+	KytyDlssgEvaluate evaluate {};
+	evaluate.backbuffer = BridgeImage(backbuffer, vk::ImageAspectFlagBits::eColor);
+	evaluate.depth      = BridgeImage(inputs->depth, inputs->depth_view);
+	evaluate.motion     = BridgeImage(inputs->motion, inputs->motion_view);
+	if (HudlessOn() && inputs->hudless.has_display) evaluate.hudless = BridgeImage(inputs->hudless.display, inputs->hudless.display_view);
+	// The camera as the Streamline way gives it (BeforePresent): defaults for a frame whose matrix does not split.
+	auto view_to_clip = Identity(), clip_to_view = Identity(), clip_to_prev = Identity(), prev_to_clip = Identity();
+	evaluate.mv_scale_x = evaluate.mv_scale_y = 1.0f;
+	evaluate.camera_up[1]    = 1.0f;
+	evaluate.camera_right[0] = 1.0f;
+	evaluate.camera_fwd[2]   = 1.0f;
+	evaluate.camera_near     = 0.1f;
+	evaluate.camera_far      = 10000.0f;
+	evaluate.camera_fov      = 1.0f;
+	evaluate.camera_aspect   = 16.0f / 9.0f;
+	if (const auto camera = Decompose(inputs->camera.view_proj); camera.valid) {
+		// Projection in view space: x' = sx*x + cx*z, y' = sy*y + cy*z, z' = near, w' = z.
+		RowMatrix projection {};
+		projection[0]  = camera.sx;
+		projection[5]  = camera.sy;
+		projection[8]  = camera.cx;
+		projection[9]  = camera.cy;
+		projection[11] = 1.0f;
+		projection[14] = camera.z_near;
+		view_to_clip   = projection;
+		(void)Inverted(projection, clip_to_view);
+		const auto current  = Transposed(inputs->camera.view_proj);
+		const auto previous = Transposed(inputs->camera.prev_view_proj);
+		if (RowMatrix clip_to_world {}; Inverted(current, clip_to_world)) {
+			clip_to_prev = Multiply(clip_to_world, previous);
+			(void)Inverted(clip_to_prev, prev_to_clip);
+		}
+		const float width  = static_cast<float>(inputs->render_extent.width);
+		const float height = static_cast<float>(inputs->render_extent.height);
+		evaluate.jitter_x  = inputs->camera.jitter_ndc[0] * width * 0.5f;
+		evaluate.jitter_y  = -inputs->camera.jitter_ndc[1] * height * 0.5f;
+		// The game's vectors point along the motion, in UV units (its TAA reads the history at uv - mv); DLSS-G wants
+		// them towards the previous position, so they are negated (the Streamline way's KYTY_FRAMEGEN_MV_SIGN and
+		// KYTY_FRAMEGEN_MV=px, the same tests).
+		static const bool pixels_mv = [] {
+			const char* mv = std::getenv("KYTY_FRAMEGEN_MV");
+			return mv != nullptr && std::string(mv) == "px";
+		}();
+		static const float mv_sign = [] {
+			const char* sign = std::getenv("KYTY_FRAMEGEN_MV_SIGN");
+			return sign != nullptr && std::atof(sign) > 0 ? 1.0f : -1.0f;
+		}();
+		evaluate.mv_scale_x = pixels_mv ? mv_sign / width : mv_sign;
+		evaluate.mv_scale_y = pixels_mv ? mv_sign / height : mv_sign;
+		for (int i = 0; i < 3; ++i) {
+			evaluate.camera_pos[i]   = camera.position[i];
+			evaluate.camera_up[i]    = camera.up[i];
+			evaluate.camera_right[i] = camera.right[i];
+			evaluate.camera_fwd[i]   = camera.forward[i];
+		}
+		evaluate.camera_near   = camera.z_near;
+		evaluate.camera_far    = 100000.0f;
+		evaluate.camera_fov    = 2.0f * std::atan(1.0f / std::fabs(camera.sy));
+		evaluate.camera_aspect = std::fabs(camera.sy / camera.sx);
+	}
+	Copy16(evaluate.camera_view_to_clip, view_to_clip);
+	Copy16(evaluate.clip_to_camera_view, clip_to_view);
+	Copy16(evaluate.clip_to_prev_clip, clip_to_prev);
+	Copy16(evaluate.prev_clip_to_clip, prev_to_clip);
+	evaluate.depth_inverted = 1;
+	evaluate.reset          = reset ? 1 : 0;
+	// The backbuffer's part with the game image (KYTY_PRESENT_ASPECT, KYTY_RENDER_ASPECT: black around it).
+	if (region.offset.x != 0 || region.offset.y != 0 || region.extent.width != backbuffer.extent.width ||
+	    region.extent.height != backbuffer.extent.height) {
+		evaluate.backbuffer_x      = static_cast<uint32_t>(region.offset.x);
+		evaluate.backbuffer_y      = static_cast<uint32_t>(region.offset.y);
+		evaluate.backbuffer_width  = region.extent.width;
+		evaluate.backbuffer_height = region.extent.height;
+	}
+	evaluate.multi_frame_count = count;
+	uint32_t made              = 0;
+	for (uint32_t i = 0; i < count; ++i) {
+		evaluate.output            = BridgeImage(outputs[i], vk::ImageAspectFlagBits::eColor);
+		evaluate.multi_frame_index = i + 1;
+		if (g_dlss->FrameGenEvaluate(static_cast<VkCommandBuffer>(command), &evaluate) == 0) break;
+		++made;
+	}
+	if (made < count) {
+		static uint32_t failures = 0;
+		if (++failures >= 3) {
+			g_fg_failed = true;
+			std::printf("Frame generation: NGX refused DLSS-G %u times: off from here on\n", failures);
+		} else {
+			std::printf("Frame generation: NGX's DLSS-G evaluation failed (this frame shown alone)\n");
+		}
+		std::fflush(stdout);
+		g_fg_history = false;
+		return 0;
+	}
+	g_fg_history = true;
+	return reset ? 0u : made;
+#else
+	(void)command;
+	(void)inputs;
+	(void)backbuffer;
+	(void)region;
+	(void)outputs;
+	return 0;
 #endif
 }
 
