@@ -892,6 +892,12 @@ if (WIN32)
 		set_property(SOURCE "${KYTY_SOURCE_DIR}/local/frame-gen.cpp" APPEND PROPERTY
 		             COMPILE_DEFINITIONS KYTY_FRAMEGEN_FSR=1)
 	endif()
+elseif (LINUX)
+	# Linux has no Streamline: DLSS (KYTY_UPSCALER=dlss) through NVIDIA's NGX, by the bridge libkyty_dlss.so that
+	# tools/local/dlss-bridge/build-dlss-linux.sh builds apart; loaded at run time (dlopen), the emulator links no NVIDIA
+	# code.
+	set_property(SOURCE "${KYTY_SOURCE_DIR}/local/frame-gen.cpp" APPEND PROPERTY
+	             COMPILE_DEFINITIONS KYTY_FRAMEGEN_NGX=1)
 endif()
 
 clang_tidy_check(kyty_emulator "" "${check_headers}" "${inc_headers}")

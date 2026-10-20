@@ -1407,6 +1407,8 @@ void WindowContext::CreateVulkan() {
 	}
 #endif
 	inst_info.pApplicationInfo        = &app_info;
+	// Linux DLSS (KYTY_UPSCALER=dlss): the instance extensions NVIDIA's NGX needs.
+	FrameGen::AddInstanceExtensions(r.available_extensions, r.required_extensions);
 	inst_info.enabledExtensionCount   = static_cast<uint32_t>(r.required_extensions.size());
 	inst_info.ppEnabledExtensionNames = r.required_extensions.data();
 	inst_info.enabledLayerCount =
@@ -1560,6 +1562,9 @@ void WindowContext::CreateVulkan() {
 		}
 		AddPipelineBinaryExtensions(available_extensions, device_extensions);
 		AddCopyMemoryIndirectExtension(available_extensions, device_extensions);
+		// Linux DLSS (KYTY_UPSCALER=dlss): the device extensions NVIDIA's NGX needs.
+		FrameGen::AddDeviceExtensions(graphic_ctx.instance, graphic_ctx.physical_device, available_extensions,
+		                              device_extensions);
 	}
 
 	VulkanInitSubgroupSizeControl(graphic_ctx.physical_device, graphic_ctx);
