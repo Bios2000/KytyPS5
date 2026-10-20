@@ -48,7 +48,9 @@
 #include <string>
 #include <sys/resource.h>
 #include <sys/syscall.h>
+#include <thread>
 #include <unistd.h>
+#include <x86intrin.h>
 #endif
 
 namespace LocalPlatform {
@@ -1680,8 +1682,19 @@ double ThreadCpuSeconds(uint64_t handle) {
 	return ClockSeconds(clock);
 }
 
+// The thread's CPU time in TSC ticks, as Windows' thread cycle count is (the slow-frame lines' cpu=: busy wall time well
+// over it is time the thread was blocked or not running). The TSC rate is measured once.
 uint64_t CurrentThreadCycles() {
-	return 0;
+	static const double ticks_per_ns = [] {
+		const auto     start = std::chrono::steady_clock::now();
+		const uint64_t first = __rdtsc();
+		std::this_thread::sleep_for(std::chrono::milliseconds(20));
+		const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count();
+		return ns > 0 ? static_cast<double>(__rdtsc() - first) / static_cast<double>(ns) : 0.0;
+	}();
+	timespec time {};
+	if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &time) != 0) return 0;
+	return static_cast<uint64_t>((static_cast<double>(time.tv_sec) * 1e9 + static_cast<double>(time.tv_nsec)) * ticks_per_ns);
 }
 
 int CurrentThreadPriority() {
