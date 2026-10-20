@@ -44,7 +44,11 @@ double Glide(float x, float y, float z, float speed);
 // reads the pad, through the engine's own command entry (the one its debug "golden path" helper calls). False: another
 // build (nothing queued).
 bool QueueCommand(std::string_view text);
-// The pad read (libs/controller.cpp): runs a queued command.
+// Live `gamekill RADIUS` (01.007.000, automated tours): the characters but the player within RADIUS m of it that still
+// have HP die the way +cp11_allSuicideExceptPlayer kills every character (the game's suicide of a ChrIns), on the
+// game's pad-reading thread as a queued command. False: another build (nothing queued).
+bool QueueKill(float radius);
+// The pad read (libs/controller.cpp): runs a queued command (and a queued kill).
 void RunQueuedCommand();
 
 bool        Arm(std::string_view map, std::string_view spawn);

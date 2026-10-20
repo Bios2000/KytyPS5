@@ -289,6 +289,58 @@ std::mutex        g_command_mutex;
 std::string       g_command;
 std::atomic<bool> g_command_pending {false};
 
+// 01.007.000's +cp11_allSuicideExceptPlayer (0x900346490): for each of ChrInsMan's characters (count i32 at +0x24, the
+// ChrIns pointers at q[+0x18]) it calls the ChrIns suicide at 0x9003306c0 (chr, 0, 0, 0): death flags, the death state
+// ("StartingOffDead"). The suicide's first bytes and the command's list reads identify the build.
+constexpr uint64_t KillCharacter = 0x9003306c0;
+bool               IsKillBuild() {
+	static constexpr uint8_t Suicide[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57, 0x41, 0x56, 0x41,
+	                                      0x54, 0x53, 0xc6, 0x87, 0xd0, 0x05, 0x00, 0x00, 0x01};
+	static constexpr uint8_t Count[]   = {0x41, 0x8b, 0x47, 0x24};                         // mov eax, [r15 + 0x24]
+	static constexpr uint8_t Array[]   = {0x49, 0x8b, 0x4f, 0x18, 0x48, 0x8b, 0x3c, 0xd9}; // mov rcx, [r15 + 0x18] ...
+	uint8_t suicide[sizeof(Suicide)] {}, count[sizeof(Count)] {}, array[sizeof(Array)] {};
+	return Peek(KillCharacter, &suicide) && Peek(0x900346504, &count) && Peek(0x90034652b, &array) &&
+	       std::memcmp(suicide, Suicide, sizeof(Suicide)) == 0 && std::memcmp(count, Count, sizeof(Count)) == 0 &&
+	       std::memcmp(array, Array, sizeof(Array)) == 0;
+}
+std::atomic<float> g_kill_radius {0.0f}; // (0: none queued)
+
+bool FindPlayer(uint64_t* ctrl, uint64_t* body);
+
+// The pad-reading thread: the characters within `radius` of the player killed (RunQueuedCommand).
+void RunKill(float radius) {
+	uint64_t man = 0, player = 0, ctrl = 0, body = 0, array = 0;
+	float    at[3] {};
+	if (!Peek(0x9027cf378, &man) || man == 0 || !Peek(man + 0x258, &player) || !FindPlayer(&ctrl, &body) ||
+	    !Peek(body + 0x20, &at) || !Peek(man + 0x18, &array)) {
+		std::printf("Game kill: no player\n");
+		return;
+	}
+	using Suicide = KYTY_SYSV_ABI void (*)(uint64_t chr, uint32_t a, uint32_t b, uint32_t c);
+	int32_t     count = 0, alive = 0, killed = 0;
+	std::string list;
+	for (int32_t i = 0; Peek(man + 0x24, &count) && i < count; i++) {
+		uint64_t chr = 0, chr_ctrl = 0, chr_body = 0;
+		int32_t  hp  = 0;
+		float    pos[3] {};
+		if (!Peek(array + 8u * static_cast<uint64_t>(i), &chr) || chr == 0 || chr == player || !Peek(chr + 0x710, &hp) ||
+		    hp <= 0 || !Peek(chr + 0x38, &chr_ctrl) || !Peek(chr_ctrl + 0x20, &chr_body) || !Peek(chr_body + 0x20, &pos))
+			continue;
+		alive++;
+		const float dx = pos[0] - at[0], dy = pos[1] - at[1], dz = pos[2] - at[2];
+		const float distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+		if (!(distance <= radius)) continue;
+		reinterpret_cast<Suicide>(KillCharacter)(chr, 0, 0, 0);
+		killed++;
+		char part[64];
+		std::snprintf(part, sizeof(part), " %.1fm/%dhp", distance, hp);
+		list += part;
+	}
+	std::printf("Game kill: %d of %d living characters within %.1f m of the player (%.1f %.1f %.1f)%s\n", killed, alive,
+	            radius, at[0], at[1], at[2], list.c_str());
+	std::fflush(stdout);
+}
+
 // The player's ChrIns +0x38 is its ChrCtrl, that +0x20 its physics body: angles at +0x10, position at +0x20 (y up, the
 // MSB and save coordinates). ChrCtrl +0xfc is a warp request the game applies the next frame (and clears): position
 // at +0x100, angles at +0x110, the request byte written last.
@@ -354,8 +406,20 @@ bool QueueCommand(std::string_view text) {
 #endif
 }
 
+bool QueueKill(float radius) {
+#if defined(_WIN32)
+	if (!(radius > 0) || !IsPlayerBuild() || !IsKillBuild()) return false;
+	g_kill_radius.store(radius, std::memory_order_release);
+	return true;
+#else
+	(void)radius;
+	return false;
+#endif
+}
+
 void RunQueuedCommand() {
 #if defined(_WIN32)
+	if (g_kill_radius.load(std::memory_order_relaxed) > 0) RunKill(g_kill_radius.exchange(0.0f, std::memory_order_acq_rel));
 	if (!g_command_pending.load(std::memory_order_acquire)) return;
 	std::string text;
 	{
