@@ -564,8 +564,13 @@ std::string Sweep(double seconds, float radius) {
         return Peek(chr + 0x710, hp) && Peek(chr + 0x38, &chr_ctrl) && Peek(chr_ctrl + 0x20, &chr_body) &&
                Peek(chr_body + 0x20, reinterpret_cast<float (*)[3]>(pos));
 	};
-	std::unordered_set<uint64_t> skipped;
-	int                          killed = 0, strikes = 0, waits = 0;
+	// The characters given up on stay so for the sweeps that follow on the same map (one map's characters stay loaded
+	// past an area's travel: 1-1's Phalanx blobs came back at 1-2 and 1-3); the player's ChrIns made anew = another map.
+	static std::unordered_set<uint64_t> skipped;
+	static uint64_t                     skipped_player = 0;
+	size_t                              skipped_before = 0;
+	int                                 killed = 0, strikes = 0, waits = 0;
+	bool                                first = true;
 	while (std::chrono::steady_clock::now() < deadline) {
 		uint64_t man = 0, player = 0, ctrl = 0, body = 0, array = 0;
 		float    at[3] {};
@@ -575,6 +580,11 @@ std::string Sweep(double seconds, float radius) {
 			waits++;
 			std::this_thread::sleep_for(std::chrono::milliseconds(250));
 			continue;
+		}
+		if (first) {
+			first = false;
+			if (player != skipped_player) skipped.clear(), skipped_player = player;
+			skipped_before = skipped.size();
 		}
 		// The player's hits kill (cp11_characters_playerExterminate), no damage taken, no death (event bits 0x50: a fall
 		// into a pit as well); again each time, a level load resets them.
@@ -613,7 +623,9 @@ std::string Sweep(double seconds, float radius) {
 			const float turn = 1.5707963f * static_cast<float>(attempt);
 			const float ux = dx / length, uz = dz / length;
 			const float rx = ux * std::cos(turn) - uz * std::sin(turn), rz = ux * std::sin(turn) + uz * std::cos(turn);
-			const float stand[3] = {pos[0] - rx * 1.3f, pos[1] + 0.1f, pos[2] - rz * 1.3f};
+			// (A boss's later tries from 3 m: the Tower Knight's 1.3 m from its position is inside it.)
+			const float reach    = attempt >= 4 ? 3.0f : 1.3f;
+			const float stand[3] = {pos[0] - rx * reach, pos[1] + 0.1f, pos[2] - rz * reach};
 			WarpPlayer(stand, std::atan2(-(pos[0] - stand[0]), -(pos[2] - stand[2])));
 			std::this_thread::sleep_for(std::chrono::milliseconds(120));
 			Libs::Controller::SetScriptedInput(-1, -1, -1, -1, 0x800, 0.12); // R1: the right hand's light attack
@@ -630,7 +642,7 @@ std::string Sweep(double seconds, float radius) {
 		            best_pos[2], best_hp, best_distance, elapsed());
 	}
 	char report[200];
-	std::snprintf(report, sizeof(report), "killed %d, skipped %zu (%d strikes, %.1f s%s)", killed, skipped.size(), strikes,
+	std::snprintf(report, sizeof(report), "killed %d, skipped %zu (%d strikes, %.1f s%s)", killed, skipped.size() - skipped_before, strikes,
 	              elapsed(), std::chrono::steady_clock::now() >= deadline ? ", time up" : "");
 	std::printf("Game sweep: done, %s\n", report);
 	std::fflush(stdout);
