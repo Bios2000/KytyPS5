@@ -28,6 +28,7 @@
 #include "graphics/host_gpu/renderer/pipeline/moduleStore.h"
 #include "graphics/host_gpu/renderer/render.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
+#include "local/anti-lag.h"
 #include "graphics/host_gpu/vulkanCommon.h"
 #include "graphics/presentation/presenter.h"
 #include "graphics/presentation/systemOverlay.h"
@@ -1061,6 +1062,8 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
 
 	vk::Device device = nullptr;
 
+	VkPhysicalDeviceAntiLagFeaturesAMD anti_lag {};
+	AntiLag::ChainFeature(physical_device, device_extensions, create_info, anti_lag);
 	// (Frame generation's device creation reserves host address space below 1 TiB: the range kept free for it, issue #45.)
 	LibKernel::Memory::ReleaseFrameGenAddressHole();
 	auto result = physical_device.createDevice(&create_info, nullptr, &device);
@@ -1406,6 +1409,7 @@ void WindowContext::CreateVulkan() {
 	inst_info.ppEnabledLayerNames =
 	    (r.enable_validation_layers ? r.required_layers.data() : nullptr);
 
+	AntiLag::BeforeInstance(); // (Mesa's anti-lag layer is implicit: an environment variable before the instance)
 	const vk::Result result = vk::createInstance(&inst_info, nullptr, &graphic_ctx.instance);
 	switch (result) {
 		case vk::Result::eSuccess: break;
@@ -1545,6 +1549,7 @@ void WindowContext::CreateVulkan() {
 		}
 		AddPipelineBinaryExtensions(available_extensions, device_extensions);
 		AddCopyMemoryIndirectExtension(available_extensions, device_extensions);
+		AntiLag::AddDeviceExtension(available_extensions, device_extensions); // (KYTY_LOW_LATENCY)
 		// Linux DLSS (KYTY_UPSCALER=dlss): the device extensions NVIDIA's NGX needs.
 		FrameGen::AddDeviceExtensions(graphic_ctx.instance, graphic_ctx.physical_device, available_extensions,
 		                              device_extensions);
@@ -1572,6 +1577,7 @@ void WindowContext::CreateVulkan() {
 		EXIT("Could not create device");
 	}
 	VULKAN_HPP_DEFAULT_DISPATCHER.init(graphic_ctx.device);
+	AntiLag::OnDevice(graphic_ctx.device);
 	FrameGen::BypassCommandHooks(graphic_ctx.device);
 #ifdef KYTY_LOCAL_VULKAN_RECORDING
 	LocalVulkanRecording::Install();
