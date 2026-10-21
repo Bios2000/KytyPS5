@@ -57,7 +57,11 @@ if [ ${#missing[@]} -gt 0 ]; then
 		{ echo "git and a C++ compiler (g++) are needed, and this distribution's package manager is not one this script knows: install them, then run it again" >&2; exit 1; }
 	[ "$(id -u)" = 0 ] || install=(sudo "${install[@]}")
 	# (Asked first: it changes the system. Without a terminal to ask on, the command is shown instead.)
-	echo "DLSS's build needs ${missing[*]/compiler/a C++ compiler}: ${install[*]}"
+	needs=()
+	for name in "${missing[@]}"; do if [ "$name" = compiler ]; then needs+=('a C++ compiler'); else needs+=("$name"); fi; done
+	list="${needs[0]}"
+	[ ${#needs[@]} -lt 2 ] || list="${needs[0]} and ${needs[1]}"
+	echo "DLSS's build needs $list: ${install[*]}"
 	answer=''
 	[ -t 0 ] && read -r -p "Install it now? [y/N] " answer
 	[[ "$answer" =~ ^[Yy] ]] || { echo "install it (the command above), then run this again" >&2; exit 1; }
