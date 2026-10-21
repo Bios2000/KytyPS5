@@ -61,6 +61,10 @@ folder (usually named `PPSA01341-app0`).
   too, read without extracting it: choose it with the launcher's `.zar...` button, or run
   `run.cmd -Game "D:\Games\PPSA01341-app0.zar"`. Pack it with `zarchive.exe <folder> <file.zar>`
   (ZArchive, https://github.com/Exzap/ZArchive/releases). The folder stays the main way.
+- On a hard disk (HDD): pack the game into a `.zar` there and keep the emulator folder (with its
+  `_PipelineCache`, about 6 GB) on an SSD. Unpacked on a busy hard disk, every small read of the game
+  waited 100-500 ms: long area loads and freezes while walking; packed, with the emulator on the SSD, it
+  ran at full speed ([#91](https://github.com/chenxiao07/KytyPS5/issues/91)).
 
 ### Add-on content (DLC)
 
