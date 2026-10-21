@@ -41,7 +41,6 @@
 #include <tuple>
 #include <vulkan/vulkan_format_traits.hpp>
 #include <xxhash.h>
-#include "speculation-state.h"
 
 [[gnu::used]] volatile std::atomic<uint32_t> kyty_local_write_window_handoff_mode {1};
 [[gnu::used]] volatile std::atomic<uint32_t> kyty_local_image_granules_mode {2};
@@ -383,11 +382,10 @@ TextureCache::TextureCache(GraphicContext& graphics, CommandScheduler& scheduler
 				cache->m_scheduler.Context().GetGpu().SendCommandSync(
 				    [cache, vaddr, size, touch] { cache->RestoreOffloaded(vaddr, size, static_cast<uint8_t>(touch)); });
 			});
-			// Not: the upload worker (the render thread waits for it), deferred GPU work, a speculation's recorder (they
-			// cannot wait for the GPU), other host threads (the render thread may wait for them).
+			// Not: the upload worker (the render thread waits for it), deferred GPU work (it cannot wait for the GPU),
+			// other host threads (the render thread may wait for them).
 			state.can_wait.store(+[] {
-				if (AsyncUpload::t_worker || CommandScheduler::InDeferredOperation() || CommandScheduler::ThreadRecorder() != nullptr)
-					return false;
+				if (AsyncUpload::t_worker || CommandScheduler::InDeferredOperation()) return false;
 				return GuestGpu::IsGpuThread() || LibKernel::PthreadSelfOrNull() != nullptr;
 			});
 		}
@@ -567,8 +565,6 @@ ImageId TextureCache::InsertImage(const ImageInfo& info, bool may_fail) {
 // table set touches its images at least every 8 flips: TableImageSet::TouchTicks.)
 size_t TextureCache::ReclaimImageMemory(uint64_t bytes, bool all) {
 	constexpr uint64_t UnusedTicks = 16;
-	// (A speculation's recorder cannot wait for the GPU: the GPU thread translates that work again.)
-	if (CommandScheduler::ThreadRecorder() != nullptr) throw CommandScheduler::RecorderRefusal {"ReclaimImageMemory"};
 	const auto           start = std::chrono::steady_clock::now();
 	const uint64_t       goal  = all ? UINT64_MAX : std::max(bytes * 2, uint64_t {256} << 20u);
 	uint64_t             freed = 0;
@@ -586,9 +582,7 @@ size_t TextureCache::ReclaimImageMemory(uint64_t bytes, bool all) {
 	if (!victims.empty()) {
 		m_scheduler.Wait(m_scheduler.CurrentTick());
 		// (Destroyed now, not after RetireImage's operation: the GPU is done with them.)
-		const auto packet = Spec::PacketNow();
-		for (const auto id: victims) m_retired.emplace_back(id, packet);
-		EraseRetired();
+		for (const auto id: victims) EraseSlot(id);
 		LiveCounters::Add(LiveCounters::GcImageDeletes, victims.size());
 	}
 	static std::atomic<uint32_t> reports {0};
@@ -628,11 +622,6 @@ bool TextureCache::RegistrationsOverlapSince(uint64_t address, uint64_t size, ui
 	for (auto entry = log.rbegin(); entry != log.rend() && entry->epoch > epoch; ++entry)
 		if ((entry->begin & ~(page - 1)) < end && begin < ((entry->end + page - 1) & ~(page - 1))) return true;
 	return false;
-}
-
-bool TextureCache::StillResolved(const Image& image, uint64_t serial, uint64_t epoch) const {
-	return image.serial == serial && image.registered &&
-	       !RegistrationsSince(image.info.data.address, image.info.data.size, epoch);
 }
 
 bool TextureCache::RegistrationsSince(uint64_t address, uint64_t size, uint64_t epoch) const {
@@ -764,16 +753,10 @@ bool TextureCache::DetachImage(ImageId id) {
 }
 
 void TextureCache::RetireImage(ImageId id) {
-	// (A speculation's packet may still read it: Spec::PacketNow.)
-	const auto packet = Spec::PacketNow();
 	if (m_scheduler.Active()) {
-		m_scheduler.DeferOperation([this, id, packet] {
-			m_retired.emplace_back(id, packet);
-			EraseRetired();
-		});
+		m_scheduler.DeferOperation([this, id] { EraseSlot(id); });
 	} else {
-		m_retired.emplace_back(id, packet);
-		EraseRetired();
+		EraseSlot(id);
 	}
 }
 
@@ -848,11 +831,6 @@ void TextureCache::FreeGuestAliases(ImageId written) {
 }
 
 void TextureCache::TouchImage(Image& image) {
-	if (auto* spec = Spec::Current()) { // (touched when the speculative translation is committed)
-		auto& touched = spec->touched_images;
-		if (touched.empty() || touched.back().first != &image) touched.emplace_back(&image, image.serial);
-		return;
-	}
 	if (image.registered) {
 		m_lru_cache.Touch(image.lru_id, m_gc_tick);
 	}
@@ -2084,8 +2062,7 @@ bool TextureCache::RefillUpload(Image& image) {
 		return false;
 	};
 	if (image.staged_ring == nullptr) return refuse("none");
-	if (image.staged_serial != m_scheduler.CommandSerial() || m_scheduler.CurrentTick() >= CommandScheduler::PendingTick ||
-	    m_scheduler.Current().IsInvalid())
+	if (image.staged_serial != m_scheduler.CommandSerial() || m_scheduler.Current().IsInvalid())
 		return refuse("submitted");
 	if (image.IsBufferModified() || image.IsGpuModified() || image.usage.storage || image.usage.render_target ||
 	    image.usage.depth_target || image.binding.is_target || UploadBinding(image) == BindingType::DepthTarget)
@@ -2127,7 +2104,6 @@ void TextureCache::InitializeImage(ImageId id) {
 		RestoreOffloaded(image.info.data.address, image.info.data.size, static_cast<uint8_t>(TextureOffload::Touch::Upload));
 	}
 	if (TextureOffload::IsRestoring(image.info.data.address, image.info.data.size)) {
-		if (CommandScheduler::ThreadRecorder() != nullptr) throw CommandScheduler::RecorderRefusal {"texture offload restore"};
 		if (m_offload_unsubmitted) {
 			m_offload_unsubmitted = false;
 			m_scheduler.Flush();
@@ -3410,7 +3386,7 @@ bool TextureCache::IsSampledImageCurrent(ImageId id, const ImageDesc& desc, bool
 	    !(image->info.resources == desc.info.resources)) {
 		return false;
 	}
-	if (Spec::Current() == nullptr) image->frame_accessed_last = m_frame.load(std::memory_order_relaxed);
+	image->frame_accessed_last = m_frame.load(std::memory_order_relaxed);
 	TouchImage(*image);
 	return true;
 }
@@ -3440,7 +3416,7 @@ bool TextureCache::IsSampledDepthCurrent(ImageId id, const ImageDesc& desc, uint
 		}
 		if (associations != 1 || !leads_here) return false;
 	}
-	if (Spec::Current() == nullptr) image->frame_accessed_last = m_frame.load(std::memory_order_relaxed);
+	image->frame_accessed_last = m_frame.load(std::memory_order_relaxed);
 	TouchImage(*image);
 	return true;
 }
@@ -3493,7 +3469,7 @@ bool TextureCache::TryReuseSampledImage(ImageId id, const ImageDesc& desc, uint6
 	// The caller recorded this owner after an ordinary lookup, without an intervening
 	// registration change. A new compatible alias also changes the epoch, so it cannot
 	// silently take precedence over the cached owner. Subresource/format remaps fall back.
-	if (Spec::Current() == nullptr) image->frame_accessed_last = m_frame.load(std::memory_order_relaxed);
+	image->frame_accessed_last = m_frame.load(std::memory_order_relaxed);
 	TouchImage(*image);
 	// Nothing registered over the pages since `epoch`, so nothing since `current` either: the
 	// caller's proof moves to the current epoch (registrations stamp their pages under m_lock),
@@ -3709,7 +3685,6 @@ void TextureCache::CommitGpuWrite(Image& image, bool keep_partial) {
 		FinishRefresh(image);
 	}
 	image.MarkGpuModified();
-	Spec::NoteGpuWrite(image.info.data.address, image.info.data.size);
 }
 
 bool TextureCache::ClearImageFromBuffer(CommandBuffer& command, uint64_t address, uint64_t size,
@@ -4354,11 +4329,10 @@ void TextureCache::OffloadScan(uint64_t tick) {
 #endif
 }
 
-// Render thread (a speculation's recorder refuses): the discarded ranges over [vaddr, vaddr + size) downloaded back from
-// their images in one submission, the render thread waiting for it; their read watchers then go.
+// Render thread: the discarded ranges over [vaddr, vaddr + size) downloaded back from their images in one submission,
+// the render thread waiting for it; their read watchers then go.
 void TextureCache::RestoreOffloaded(uint64_t vaddr, uint64_t size, uint8_t touch_value, bool async) {
 #if defined(_WIN32)
-	if (CommandScheduler::ThreadRecorder() != nullptr) throw CommandScheduler::RecorderRefusal {"texture offload restore"};
 	const auto touch  = static_cast<TextureOffload::Touch>(touch_value);
 	auto       ranges = TextureOffload::BeginRestore(vaddr, size, touch, touch == TextureOffload::Touch::Count, async);
 	if (ranges.empty()) return;
@@ -4496,19 +4470,8 @@ uint64_t TextureCache::PendingDownloadTick(uint64_t address, uint64_t size) {
 	return latest;
 }
 
-void TextureCache::TouchSpeculated(Image& image, uint64_t serial) {
-	std::scoped_lock lock {m_lock};
-	if (image.serial != serial || !image.registered) return;
-	image.frame_accessed_last = m_frame.load(std::memory_order_relaxed);
-	TouchImage(image);
-}
-
 void TextureCache::InvalidateMemoryFromGPU(uint64_t address, uint64_t size, const char* source, const uint32_t* fill) {
 	if (!GuestRange {address, size}.Valid()) {
-		return;
-	}
-	if (auto* spec = Spec::Current()) {
-		spec->NoteInvalidated(address, size); // (when it is committed)
 		return;
 	}
 	std::scoped_lock lock {m_lock};
@@ -4685,20 +4648,12 @@ bool TextureCache::IsMeta(uint64_t address) {
 
 bool TextureCache::IsMetaCleared(uint64_t address, uint32_t slice, uint32_t* fill_value,
                                  bool* fill_known) {
-	// A speculation's answer is as after its holes; one it relies on is noted (speculation-state.h).
-	auto* spec = slice < 32 && fill_value == nullptr && fill_known == nullptr ? Spec::Current() : nullptr;
-	if (spec != nullptr)
-		if (const auto known = spec->KnownMeta(address, slice); known >= 0) return known == 1;
-	const auto not_cleared = [&] {
-		if (spec != nullptr) spec->NoteMetaRead(address, slice);
-		return false;
-	};
-	if (!MetaFilterMayHold(address)) return not_cleared();
+	if (!MetaFilterMayHold(address)) return false;
 	std::scoped_lock lock {m_lock};
 	const auto       found = m_surface_metas.find(address);
 	if (found == m_surface_metas.end() || found->second.type == MetaDataInfo::Type::PendingDcc ||
 	    slice >= 32) {
-		return not_cleared();
+		return false;
 	}
 	if (fill_value != nullptr) {
 		*fill_value = found->second.fill_value;
@@ -4706,7 +4661,7 @@ bool TextureCache::IsMetaCleared(uint64_t address, uint32_t slice, uint32_t* fil
 	if (fill_known != nullptr) {
 		*fill_known = found->second.fill_known;
 	}
-	return (found->second.clear_mask & (1u << slice)) != 0 || not_cleared();
+	return (found->second.clear_mask & (1u << slice)) != 0;
 }
 
 bool TextureCache::ClearMeta(uint64_t address) {
@@ -4884,13 +4839,9 @@ void TextureCache::UnmapMemory(uint64_t address, uint64_t size) {
 	}
 }
 
-void TextureCache::EraseRetired() {
-	std::erase_if(m_retired, [&](const auto& retired) {
-		if (!Spec::PacketsPassed(retired.second)) return false;
-		m_slot_images.erase(retired.first);
-		m_erase_epoch.fetch_add(1, std::memory_order_release);
-		return true;
-	});
+void TextureCache::EraseSlot(ImageId id) {
+	m_slot_images.erase(id);
+	m_erase_epoch.fetch_add(1, std::memory_order_release);
 }
 
 // Per flip, whatever the memory use (the collector below runs only near the video memory budget, never on a 32 GB GPU):
@@ -4952,7 +4903,6 @@ void TextureCache::RetireStaleImages(uint64_t tick) {
 }
 
 void TextureCache::RunGarbageCollector() {
-	EraseRetired();
 	std::scoped_lock lock {m_lock};
 	const uint64_t   tick = m_gc_tick++;
 	// Parked images not taken back since the flip before: the game left that use of the memory.

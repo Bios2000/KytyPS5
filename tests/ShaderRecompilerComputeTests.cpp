@@ -429,8 +429,7 @@ struct RenderExecutorTestAccess {
   static bool TryConsumeComputeMetaClear(RenderExecutor &executor,
                                          const ShaderComputeInputInfo &input,
                                          const CommandBuffer &buffer) {
-    uint64_t cleared = 0;
-    return executor.TryConsumeComputeMetaClear(input, buffer, 0, 0, 0, 0, cleared);
+    return executor.TryConsumeComputeMetaClear(input, buffer, 0, 0, 0, 0);
   }
 
   static TextureBinding

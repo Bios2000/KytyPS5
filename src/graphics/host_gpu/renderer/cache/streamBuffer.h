@@ -94,7 +94,7 @@ public:
 	// CommandScheduler::WaitBeforeNextSubmit). Other buffers: nothing.
 	void MakeResident(uint64_t offset, uint64_t size);
 
-	// BufferCache state lives directly on the resource (is_deleted also read by a speculative translation's thread).
+	// BufferCache state lives directly on the resource.
 	std::atomic<bool> is_deleted {false};
 	int    stream_score = 0;
 	size_t lru_id       = 0;
@@ -139,9 +139,6 @@ public:
 	                                                bool allow_wait = true);
 	void                                        Commit();
 	[[nodiscard]] uint64_t Copy(const void* source, uint64_t size, uint64_t alignment = 0);
-	// What was fenced with `pending` (a speculative translation's work: CommandScheduler::PendingTick and up) gets
-	// `tick`.
-	void ResolvePendingTicks(uint64_t pending, uint64_t tick) noexcept;
 
 private:
 	friend struct StreamBufferTestAccess;

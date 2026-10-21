@@ -10,7 +10,6 @@
 #include "graphics/host_gpu/renderer/cache/faultManager.h"
 #include "graphics/host_gpu/renderer/cache/multiLevelPageTable.h"
 #include "graphics/host_gpu/renderer/cache/streamBuffer.h"
-#include "speculation-state.h"
 
 #include <vk_mem_alloc.h>
 
@@ -66,8 +65,7 @@ public:
 		return buffer != nullptr && !buffer->is_deleted ? buffer : nullptr;
 	}
 	[[nodiscard]] BufferId FindBuffer(uint64_t vaddr, uint64_t size);
-	// FindBuffer's registered buffer over the range, none registered: the null id (a speculative translation's
-	// question whether ObtainBuffer gave the range's buffer).
+	// FindBuffer's registered buffer over the range, none registered: the null id.
 	[[nodiscard]] BufferId RegisteredBuffer(uint64_t vaddr, uint64_t size) {
 		const auto* owner = m_page_table.Find(vaddr >> PageTable::kPageBits);
 		return owner != nullptr && *owner && m_slot_buffers[*owner].IsInBounds(vaddr, size) ? *owner : BufferId {};
@@ -150,13 +148,7 @@ public:
 	[[nodiscard]] bool IsRegionRegistered(uint64_t vaddr, uint64_t size);
 	[[nodiscard]] bool HasGpuDirtyBytes(uint64_t vaddr, uint64_t size);
 	[[nodiscard]] bool IsRegionCpuModified(uint64_t vaddr, uint64_t size);
-	// After a speculative translation's work was submitted (its commit obtained the ranges it writes as written
-	// before it): the writes are that work's, which readbacks of the range wait for.
-	void NoteSpeculativeWrite(uint64_t vaddr, uint64_t size) {
-		InvalidateCopyFeedback(vaddr, size);
-		NoteGpuWrite(vaddr, size);
-	}
-	// The tracker's answer whatever a speculative translation will upload (what a cache may keep).
+	// IsRegionCpuModified's answer, inline (the table path's).
 	[[nodiscard]] bool IsRegionCpuDirty(uint64_t vaddr, uint64_t size) {
 		return m_memory_tracker.IsRegionCpuModified(vaddr, size);
 	}
@@ -173,12 +165,6 @@ public:
 	// one in the open command buffer, so a binding to the old one GPU work records after it reads or writes bytes
 	// nothing reads again (the old buffer lives until the tick). The render thread's.
 	[[nodiscard]] uint64_t UnregisterEpoch() const { return m_unregister_epoch; }
-	// A buffer registered or unregistered in the tracker regions of the range since `epoch`.
-	[[nodiscard]] bool RegisteredSince(uint64_t vaddr, uint64_t size, uint64_t epoch) const {
-		for (auto region = vaddr / TRACKER_REGION_SIZE, last = (vaddr + size - 1) / TRACKER_REGION_SIZE; region <= last; ++region)
-			if (RegionRegistrationEpoch(region * TRACKER_REGION_SIZE) > epoch) return true;
-		return false;
-	}
 	// The registration epoch of the last change of a buffer covering the tracker region of `vaddr`: a region
 	// request's proof only depends on the buffers of its own region.
 	[[nodiscard]] uint64_t RegionRegistrationEpoch(uint64_t vaddr) const {
@@ -210,10 +196,6 @@ public:
 			sum += epoch;
 		}
 		return sum;
-	}
-	// A speculative translation's use of the buffer, when it is committed.
-	void TouchSpeculated(BufferId id) {
-		if (auto* buffer = m_slot_buffers.try_get(id)) TouchBuffer(*buffer);
 	}
 	// True when `id` names a live (registered, not deleted) game buffer that
 	// covers the range and whose Vulkan handle is `handle`; refreshes its LRU slot.
@@ -302,9 +284,8 @@ private:
 	template <bool insert>
 	void ChangeRegister(BufferId id);
 	void DeleteBuffer(BufferId id);
-	// Deleted buffers a speculation's packet may still read (Spec::PacketsPassed), destroyed once it passed.
-	std::vector<std::pair<BufferId, Spec::PacketMarks>> m_retired;
-	void                                                EraseRetired();
+	// A deleted buffer destroyed, its slot erased (DeleteBuffer's, once nothing uses it).
+	void EraseSlot(BufferId id);
 	[[nodiscard]] bool SynchronizeBuffer(Buffer& buffer, uint64_t vaddr, uint64_t size,
 	                                     bool is_written, bool is_texel_buffer);
 	void UploadDirtyRanges(Buffer& buffer, uint64_t vaddr, uint64_t size, bool is_written);
@@ -351,7 +332,6 @@ private:
 	Common::SlotVector<Buffer>                        m_slot_buffers;
 	Common::LeastRecentlyUsedCache<BufferId, uint64_t> m_lru_cache;
 	BufferMap                                         m_buffers;
-	// (Read by a speculative translation's thread: src/graphics/guest_gpu/speculation.h.)
 	std::atomic<uint64_t> m_registration_epoch {1};
 	uint64_t              m_unregister_epoch {1};
 	// Per tracker region, see RegionRegistrationEpoch.

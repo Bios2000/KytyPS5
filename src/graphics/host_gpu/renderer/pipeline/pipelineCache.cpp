@@ -69,8 +69,6 @@
 extern "C" {
 // 1: find graphics pipelines through a block-hashed index of the full key.
 volatile std::atomic<uint32_t> kyty_local_pipeline_index_mode {1};
-// (performance-switches.h, KYTY_SPECULATE) Speculative translation records ahead on other threads.
-extern volatile std::atomic_uint32_t kyty_local_speculate_mode;
 }
 
 namespace Libs::Graphics {
@@ -2348,10 +2346,10 @@ vk::Pipeline BindPipelineHandle(const PipelineCache::Pipeline& pipeline) {
 // least 5) leave it: their handles destroyed (BindPipelineHandle makes one again from the store, ~1-2 ms). Their shader
 // code is video memory: on an 8 GB GPU, a 5-minute 1-1 tour took the driver's share 0.6 -> 1.0 GB while the video memory
 // in use went past the budget (7.7 GB of 7.25); evicting every pipeline idle for 5 s there (a test: 9,946 evicted, 6,188
-// made again at 1.1 ms each, fps unchanged) kept it at 0.8 GB. Not those an optimized build will replace, and none while
-// speculative translation records ahead (KYTY_SPECULATE). The time since a pipeline's last binding is what keeps its
-// handle out of commands still to run: GPU work is never minutes behind. Only pipelines in this cache's maps: a worker's
-// result enters them on this thread, its remake set before (PipelineEvictSettings, KeepsRemake).
+// made again at 1.1 ms each, fps unchanged) kept it at 0.8 GB. Not those an optimized build will replace. The time
+// since a pipeline's last binding is what keeps its handle out of commands still to run: GPU work is never minutes
+// behind. Only pipelines in this cache's maps: a worker's result enters them on this thread, its remake set before
+// (PipelineEvictSettings, KeepsRemake).
 void PipelineCache::EvictIdlePipelines() {
 	const auto& settings = PipelineEvictSettings();
 	constexpr uint32_t CheckFlips   = 60;
@@ -2374,7 +2372,7 @@ void PipelineCache::EvictIdlePipelines() {
 		m_scene_since      = now;
 		m_scene_swept      = false;
 	}
-	if (!settings.on || flip % CheckFlips != 0 || kyty_local_speculate_mode.load(std::memory_order_relaxed) != 0) return;
+	if (!settings.on || flip % CheckFlips != 0) return;
 	const bool scene_left = !m_scene_swept && now - m_scene_since >= SceneSettle;
 	uint64_t video = 0, budget = 0;
 	const bool known = m_graphics.QueryLocalVideoMemory(&video, &budget);

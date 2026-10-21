@@ -836,7 +836,6 @@ configure_macos_guest_address_space(kyty_emulator)
 if(LINUX)
 	set_property(SOURCE
 		"${KYTY_SOURCE_DIR}/graphics/guest_gpu/graphicsRun.cpp"
-		"${KYTY_SOURCE_DIR}/graphics/guest_gpu/speculation.cpp"
 		"${KYTY_SOURCE_DIR}/graphics/host_gpu/renderer/commandScheduler.cpp"
 		"${KYTY_SOURCE_DIR}/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp"
 		"${KYTY_SOURCE_DIR}/graphics/host_gpu/renderer/pipeline/descriptors.cpp"

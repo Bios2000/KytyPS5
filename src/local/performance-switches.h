@@ -52,9 +52,6 @@ extern volatile std::atomic_uint32_t kyty_local_table_store_budget;
 extern volatile std::atomic_uint32_t kyty_local_table_set_proofs;
 extern volatile std::atomic_uint32_t kyty_local_table_mru;
 #endif
-// Speculative translation of graphics command buffers (src/graphics/guest_gpu/speculation.h).
-extern volatile std::atomic_uint32_t kyty_local_speculate_mode;
-extern volatile std::atomic_uint32_t kyty_local_speculate_threads;
 }
 
 inline void InitializePerformanceSwitches() {
@@ -148,8 +145,6 @@ inline void InitializePerformanceSwitches() {
 	    // Table lookups that ask the last answer first (bits: pair cache size, variant, image set).
 	    Switch {"KYTY_TABLE_MRU", &kyty_local_table_mru, 0, 7},
 #endif
-	    Switch {"KYTY_SPECULATE", &kyty_local_speculate_mode, 0, 4},
-	    Switch {"KYTY_SPECULATE_THREADS", &kyty_local_speculate_threads, 1, 8},
 	};
 	std::string enabled;
 	for (const auto& setting: switches) {
