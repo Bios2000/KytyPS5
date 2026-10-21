@@ -18,6 +18,7 @@
 #include "vulkan-recording.h"
 #endif
 #include "frame-gen.h"
+#include "anti-lag.h"
 #include "frame-gen-hudless.h"
 #include "local-platform.h"
 #include "perf-overlay.h"
@@ -60,6 +61,7 @@ struct Presenter::Frame {
 	bool                   hdr          = false; // BT.2100 PQ pixels
 	bool                   blank        = false; // a cleared frame (no guest picture)
 	bool                   scene        = false; // the game's 3D view (FrameGen::TakeScene)
+	uint64_t               anti_lag_frame = 0;   // the frame AMD Anti-Lag numbered it (AntiLag::Flip), 0: none
 
 	void Configure(GraphicContext& graphics, vk::Extent2D extent, vk::Format format);
 	void Transit(vk::CommandBuffer command, vk::ImageLayout layout, vk::AccessFlags2 access);
@@ -839,6 +841,7 @@ struct Presenter::Impl {
 		}
 		if (ok) {
 			if (shown > 0 && !behind()) std::this_thread::sleep_until(start + spacing * shown);
+			AntiLag::Present(frame.anti_lag_frame);
 			ok = show(composed);
 		}
 		FrameGen::NotePresented(shown + 1);
@@ -1410,6 +1413,7 @@ Presenter::Frame& Presenter::PrepareFrame(CommandBuffer& buffer, const ImageInfo
 	auto*             frame = m_impl->frames.Acquire();
 	frame->hdr              = hdr;
 	frame->blank            = false;
+	frame->anti_lag_frame   = AntiLag::Flip();
 	RenderLockGuard render_lock(m_impl->renderer.GetMutex());
 	auto&             image = m_impl->ResolveSurface(info);
 	if (image.backing.format == vk::Format::eUndefined) {
@@ -1677,6 +1681,7 @@ void Presenter::Present(Frame& frame, bool reuse) {
 			                        swapchain.Extent(), swapchain.PresentRegion(), swapchain.Format(),
 			                        swapchain.ImageCount());
 		}
+		if (!reuse) AntiLag::Present(frame.anti_lag_frame);
 		status = swapchain.Present();
 		if (generate) {
 			FrameGen::AfterPresent();
