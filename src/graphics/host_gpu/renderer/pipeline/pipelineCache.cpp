@@ -1916,11 +1916,11 @@ struct PipelineCache::ProgramCache {
 	}
 
 	// The recording's records translated (warm_permutations: each record's permutation). In front of the game
-	// (KYTY_SHADER_WARMUP_BACKGROUND=0, a -Precompile run): newest first, until KYTY_SHADER_WARMUP_SECONDS or
-	// KYTY_SHADER_WARMUP_TRANSLATE_SECONDS. Beside it (`background`): every record in WarmOrder, each registered under
-	// `mutex` (the pipeline cache's) by this thread alone - a worker below normal priority holding it while the game's
-	// threads kept every CPU would hold up the render thread. The game's Get may have made the program meanwhile, or
-	// the permutation: a record then adds what the program lacks, of the same code only.
+	// (KYTY_SHADER_WARMUP_BACKGROUND=0, a -Precompile run): newest first, until KYTY_SHADER_WARMUP_SECONDS. Beside it
+	// (`background`): every record in WarmOrder, each registered under `mutex` (the pipeline cache's) by this thread
+	// alone - a worker below normal priority holding it while the game's threads kept every CPU would hold up the
+	// render thread. The game's Get may have made the program meanwhile, or the permutation: a record then adds what
+	// the program lacks, of the same code only.
 	// The permutation TranslateWarmup made (or found) for a recorded input, while the cache still has it; null: the
 	// program left (its code changed) or never had it. Under the pipeline cache's mutex, `warming` set while it is used.
 	Permutation* FindRecorded(const LocalShaderWarmup::Record& record) {
@@ -1950,19 +1950,7 @@ struct PipelineCache::ProgramCache {
 		// (It bounds the wait in front of the game; beside it, the warmup goes on: what it does not make, the game makes
 		// where first needed.)
 		if (budget_seconds && !background) warm_deadline = begin + std::chrono::seconds(budget_seconds);
-		// In front of the game, the translation alone (KYTY_SHADER_WARMUP_TRANSLATE_SECONDS; 0, the default: no limit of
-		// its own). 5 s of the newest records, the rest left to the shader prefetch and their pipelines to their first
-		// use, cost a 16-thread desktop's tour 6 render-thread hitches of 15-127 ms.
-		uint32_t translate_seconds = 0;
-		if (const char* value = std::getenv("KYTY_SHADER_WARMUP_TRANSLATE_SECONDS"); value && *value) {
-			const auto end    = value + std::strlen(value);
-			const auto parsed = std::from_chars(value, end, translate_seconds);
-			if (parsed.ec != std::errc {} || parsed.ptr != end || translate_seconds > 3600) translate_seconds = 0;
-		}
-		const char* only               = std::getenv("KYTY_SHADER_WARMUP_ONLY");
-		auto        translate_deadline = background ? std::chrono::steady_clock::time_point::max() : warm_deadline;
-		if (!background && translate_seconds != 0 && (only == nullptr || std::string_view(only) != "1"))
-			translate_deadline = std::min(translate_deadline, begin + std::chrono::seconds(translate_seconds));
+		const auto translate_deadline = background ? std::chrono::steady_clock::time_point::max() : warm_deadline;
 		const size_t count = warm_records.size();
 		warm_permutations.assign(count, nullptr);
 		warm_total.store(count, std::memory_order_relaxed);
@@ -3165,16 +3153,6 @@ static std::string StaticBlobsSignature(const vk::PhysicalDeviceProperties& prop
 	return "KytyPCBlobs1" + ShaderInputDeviceSignature(properties);
 }
 
-// KYTY_STATIC_BLOBS_FROM_CACHE=1 (the precompile): blobs made of the static pipeline cache's pipelines (loaded as a
-// source), compiled only where the driver cannot give them otherwise.
-static bool StaticBlobsFromCache() {
-	static const bool on = [] {
-		const char* value = std::getenv("KYTY_STATIC_BLOBS_FROM_CACHE");
-		return value != nullptr && std::string_view(value) == "1";
-	}();
-	return on;
-}
-
 // A static pipeline cache of this GPU and driver exists (its file begins with their signature).
 static bool StaticCacheFileMatches(const vk::PhysicalDeviceProperties& properties) {
 	const auto    signature = StaticCacheSignature(properties);
@@ -3191,7 +3169,7 @@ static bool StaticBlobsMode(GraphicContext& graphics) {
 	if (graphics.pipeline_binaries_enabled || !StaticBlobsEnabled()) return false;
 	static const bool mode = [&] {
 		std::error_code error;
-		return std::filesystem::exists(StaticBlobsPath(), error) || StaticBlobsFromCache() ||
+		return std::filesystem::exists(StaticBlobsPath(), error) ||
 		       !StaticCacheFileMatches(graphics.GetPhysicalDeviceProperties());
 	}();
 	return mode;
@@ -3247,19 +3225,12 @@ void PipelineCache::InitializeStaticCache(bool create) {
 			                 m_static_blobs->DataBytes() >> 20u, Common::PathToString(StaticBlobsPath()),
 			                 std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - begin)
 			                     .count());
-#ifdef KYTY_STATIC_PRECOMPILE
-			// A conversion (StaticBlobsFromCache) takes what the blobs lack from the static pipeline cache too.
-			if (!StaticBlobsFromCache()) return;
-			create = false;
-#else
 			return;
-#endif
 		}
-		// None yet: the precompile makes them (and loads no static cache: every shard process would hold one whole,
-		// unless it converts one: StaticBlobsFromCache); the emulator takes a static cache from before them.
+		// None yet: the precompile makes them (and loads no static cache: every shard process would hold one whole); the
+		// emulator takes a static cache from before them.
 #ifdef KYTY_STATIC_PRECOMPILE
-		if (!StaticBlobsFromCache()) return;
-		create = false;
+		return;
 #else
 		if (create) return;
 #endif

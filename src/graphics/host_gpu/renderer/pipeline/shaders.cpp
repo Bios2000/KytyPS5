@@ -855,12 +855,6 @@ static vk::Result CreatePipelineHandle(GraphicContext& graphics, PipelineCache::
 			g_blob_outcomes.Count(blobs->Holds(identity) ? g_blob_outcomes.damaged : g_blob_outcomes.absent);
 		}
 		if (blob_writer != nullptr) {
-			// A static pipeline cache from before the blobs (a conversion, KYTY_STATIC_BLOBS_FROM_CACHE): its hit gives the
-			// driver the pipeline, which a cache of the pipeline's own may then take without compiling.
-			if (cached(graphics.static_pipeline_cache)) {
-				graphics.device.destroyPipeline(pipeline.pipeline, nullptr);
-				pipeline.pipeline = nullptr;
-			}
 			vk::PipelineCacheCreateInfo empty {};
 			vk::PipelineCache           own = nullptr;
 			if (graphics.device.createPipelineCache(&empty, nullptr, &own) == vk::Result::eSuccess) {

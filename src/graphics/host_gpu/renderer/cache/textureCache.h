@@ -31,9 +31,6 @@ class CommandScheduler;
 class RenderExecutor;
 struct TextureCacheTestAccess;
 
-void                   KytyTextureGcThresholds(uint64_t total_budget, uint64_t& trigger, uint64_t& pressure,
-                                               uint64_t& critical);
-[[nodiscard]] bool     KytyGcLiveBudget();
 [[nodiscard]] uint64_t KytyGcLiveBudgetValue(const GraphicContext& graphics);
 
 class TextureCache {

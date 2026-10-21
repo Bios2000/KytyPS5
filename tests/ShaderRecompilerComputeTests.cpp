@@ -22843,10 +22843,7 @@ TestCase BufferFormatVariants() {
 // The runtime (portable) format decode against the descriptor-specialized one, for every format:
 // each load precedes every store, so both executions see the same source bytes.
 void CheckPortableFormatDecoder(bool emission_only, bool strict_specialization = false) {
-  namespace IR = ShaderRecompiler::IR;
   namespace Format = ShaderRecompiler::Format;
-  Require("PortableFormatDecoder", "configuration", IR::PortableShaders(),
-          "this test requires KYTY_PORTABLE_SHADERS=1");
   std::unique_ptr<VulkanHarness> vulkan;
   if (!emission_only) vulkan = std::make_unique<VulkanHarness>();
   const u32 subgroup = vulkan ? vulkan->SubgroupSize() : 32;

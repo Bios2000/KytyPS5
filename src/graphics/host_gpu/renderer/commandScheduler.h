@@ -42,9 +42,6 @@ public:
 	[[nodiscard]] bool FlushPending() const noexcept { return m_flush_deferred; }
 	CommandBuffer& BeginCommand();
 	uint64_t       Submit(SubmitInfo submit = {});
-	// The next submission (of the open command buffer or any later one) waits on the GPU for `semaphore` (a timeline) to
-	// reach `value`: a queue operation the commands being recorded depend on (a sparse binding, Buffer::MakeResident).
-	void WaitBeforeNextSubmit(vk::Semaphore semaphore, uint64_t value);
 	// Deferred callbacks can observe an externally owned drain, but cannot initiate shutdown:
 	// the priority runner cannot join itself.
 	void                      Shutdown();
@@ -140,9 +137,6 @@ private:
 	CommandBuffer                m_prologue;
 	uint64_t                     m_command_clock  = 0; // g_cpu_dirty_clock when m_command began
 	uint64_t                     m_command_serial = 1;
-	// WaitBeforeNextSubmit: the semaphore and the value the next submission waits for (null: none).
-	vk::Semaphore                m_next_wait_semaphore = nullptr;
-	uint64_t                     m_next_wait_value     = 0;
 	uint32_t                     m_recorded_dispatches = 0;
 	uint32_t                     m_recorded_draws      = 0;
 	bool                         m_flush_deferred      = false; // DeferrableFlush left the open buffer open

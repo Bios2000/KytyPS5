@@ -66,18 +66,10 @@ extern "C" {
 // 1: small host-copy reads of guest backing take a lock-free read transaction
 // with a cached translation instead of the backing mutex.
 [[gnu::used]] volatile std::atomic_uint32_t kyty_local_backing_read_mode {1};
-// 1: the other parts of a view a partial unmap maps again (Windows) get the GPU trackers' protection of their watched
-// pages at once, before the address-space lock is released (GuestBackingStore::ProtectRemapped). 0: given back after
-// the lock (ReapplyRemappedViews): a CPU write to a watched page in between went unseen (a GPU copy left stale, or a
-// GPU-owned page later written back over the write).
-[[gnu::used]] volatile std::atomic_uint32_t kyty_local_protective_remap {1};
 // 1: a partial unmap of a view (Windows) leaves the range parked in the view instead of unmapping the whole view and
 // mapping its other parts again (GuestBackingStore::UnmapOne); 2: parked no-access (a stray access faults, for
 // debugging). 0: views with nothing parked yet are split at once, as before (a view holding parked ranges keeps parking).
 [[gnu::used]] volatile std::atomic_uint32_t kyty_local_park_unmaps {1};
-// (Diagnostic: microseconds UnmapBacking waits after it mapped views again, before ReapplyRemappedViews: the window
-// kyty_local_protective_remap 0 leaves, widened.)
-[[gnu::used]] volatile std::atomic_uint32_t kyty_local_remap_window_us {0};
 }
 
 namespace VirtualMemory = Common::VirtualMemory;

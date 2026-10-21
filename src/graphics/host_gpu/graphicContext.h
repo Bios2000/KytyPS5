@@ -184,9 +184,6 @@ struct GraphicContext {
 	// The game buffers' own VMA pool (BufferCache), whose blocks BufferCache::Defragment compacts. KYTY_BUFFER_DEFRAG:
 	// on with a small video memory, 0 off, 1 on any GPU. Null: off, game buffers in VMA's default pools.
 	VmaPool                       game_buffer_pool = nullptr;
-	// Sparse residency buffers whose pages without memory read zero, bound on the graphics queue
-	// (MemoryUsage::SparseDeviceLocal).
-	bool                          sparse_residency_buffers = false;
 	// An image only sampled and copied (CreateImage places these apart on such a GPU).
 	[[nodiscard]] static bool     IsTextureUsage(vk::ImageUsageFlags usage) {
 		return !(usage & (vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eDepthStencilAttachment |

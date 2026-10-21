@@ -51,9 +51,6 @@
 [[gnu::used]] volatile std::atomic<uint32_t> kyty_local_partial_row_bands_mode {1};
 // 0: a sampled view refreshes the whole texture, not only its levels (RefreshTextureLevels; on by default, 0 for an A/B).
 [[gnu::used]] volatile std::atomic<uint32_t> kyty_local_texture_levels_mode {1};
-// 0: an image GPU buffer writes covered parts of is uploaded whole, not only the subresources over them (InitializeImage;
-// on by default, 0 for an A/B).
-[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_buffer_ranges_mode {1};
 // 0: a compute fill over images it does not match runs as the dispatch, and the images are uploaded after it, not cleared
 // (TryConsumeComputeImageClear, InitializeImage; on by default, 0 for an A/B; KYTY_FILL_CLEAR=0 from the start).
 [[gnu::used]] volatile std::atomic<uint32_t> kyty_local_fill_clear_mode {[] {
@@ -396,25 +393,6 @@ TextureCache::TextureCache(GraphicContext& graphics, CommandScheduler& scheduler
 		                      "clean; nothing discarded)\n");
 	}
 #endif
-}
-
-void KytyTextureGcThresholds(uint64_t total_budget, uint64_t& trigger, uint64_t& pressure, uint64_t& critical) {
-	constexpr int64_t GiB       = 1024ll * 1024 * 1024;
-	const auto        budget    = static_cast<int64_t>(std::min<uint64_t>(total_budget, INT64_MAX));
-	const auto        threshold = std::min<int64_t>(budget, 8 * GiB);
-	pressure =
-	    static_cast<uint64_t>(std::max<int64_t>(std::min(budget - 6 * threshold / 10, budget - GiB), GiB + GiB / 2));
-	critical =
-	    static_cast<uint64_t>(std::max<int64_t>(std::min(budget - 2 * threshold / 10, budget - GiB / 2), 3 * GiB));
-	trigger = static_cast<uint64_t>(std::max<int64_t>((budget - threshold) / 2, 0));
-}
-
-bool KytyGcLiveBudget() {
-	static const bool enabled = [] {
-		const char* env = std::getenv("KYTY_GC_LIVE_BUDGET");
-		return env != nullptr && std::atoi(env) != 0;
-	}();
-	return enabled;
 }
 
 uint64_t KytyGcLiveBudgetValue(const GraphicContext& graphics) {
@@ -2171,8 +2149,7 @@ void TextureCache::InitializeImage(ImageId id) {
 		// buffers holding them. At Boletaria every frame a compute shader writes two 15 MiB buffers in memory shared with
 		// render targets - a 1440p R32 array, 720p RGBA16F ones - and each of them was uploaded whole again: 105 MiB of
 		// detiles a frame for 30 MiB written (10-13).
-		if (!uploaded && image.IsBufferModified() && !image.IsCpuDirty() && !image.BufferModifiedRanges().empty() &&
-		    kyty_local_buffer_ranges_mode.load(std::memory_order_relaxed) != 0) {
+		if (!uploaded && image.IsBufferModified() && !image.IsCpuDirty() && !image.BufferModifiedRanges().empty()) {
 			const auto ranges = image.BufferModifiedRanges();
 			uploaded          = UploadImageChunked(image, &ranges);
 			if (uploaded) image.staged_ring = nullptr;
@@ -2185,8 +2162,7 @@ void TextureCache::InitializeImage(ImageId id) {
 		// again and again (an 8 GB laptop's GPU faults in the culling chain came 3 times in 4 tours with that, 10-18).
 		if (!uploaded && image.IsPartiallyCpuDirty() && !image.IsMaybeCpuDirty() &&
 		    kyty_local_partial_image_dirty_mode.load(std::memory_order_relaxed) == 1 &&
-		    (!image.IsBufferModified() || (!image.BufferModifiedRanges().empty() &&
-		                                   kyty_local_buffer_ranges_mode.load(std::memory_order_relaxed) != 0))) {
+		    (!image.IsBufferModified() || !image.BufferModifiedRanges().empty())) {
 			auto ranges = image.CpuDirtyRanges();
 			if (image.IsBufferModified()) {
 				for (const auto& [begin, end]: image.BufferModifiedRanges()) Image::AddRange(ranges, begin, end);
@@ -4829,27 +4805,7 @@ void TextureCache::RunGarbageCollector() {
 	if (m_graphics.CanReportMemoryUsage()) {
 		m_total_used_memory = m_graphics.GetDeviceMemoryUsage();
 	}
-	if (KytyGcLiveBudget() && m_graphics.CanReportMemoryUsage()) {
-		static auto   kyty_budget_window = std::chrono::steady_clock::time_point {};
-		const auto    now                = std::chrono::steady_clock::now();
-		const uint64_t budget            = KytyGcLiveBudgetValue(m_graphics);
-		if (now - kyty_budget_window >= std::chrono::seconds(2)) {
-			kyty_budget_window = now;
-			uint64_t trigger = 0, pressure = 0, critical = 0;
-			KytyTextureGcThresholds(budget, trigger, pressure, critical);
-			const auto moved = [](uint64_t a, uint64_t b) { return (a > b ? a - b : b - a) >= (uint64_t {64} << 20u); };
-			if (moved(trigger, m_trigger_gc_memory)) {
-				std::printf("KYTYGCBUDGET texture budget=%lluMB trigger=%lluMB pressure=%lluMB critical=%lluMB "
-				            "used=%lluMB\n",
-				            static_cast<unsigned long long>(budget >> 20), static_cast<unsigned long long>(trigger >> 20),
-				            static_cast<unsigned long long>(pressure >> 20),
-				            static_cast<unsigned long long>(critical >> 20),
-				            static_cast<unsigned long long>(m_total_used_memory >> 20));
-				std::fflush(stdout);
-			}
-			m_trigger_gc_memory = trigger;
-		}
-	} else if (m_graphics.CanReportMemoryUsage() && !m_graphics.small_video_memory) {
+	if (m_graphics.CanReportMemoryUsage() && !m_graphics.small_video_memory) {
 		// The budget Windows gives now, not the one at start-up: another program's video memory lowers it (a Discord
 		// stream: 15.2 -> 13.9 GB on a 16 GB GPU), and past it Windows moves the game's memory out of video memory
 		// (60 -> 20-30 fps). Its lowest of the last 30 s (KytyGcLiveBudgetValue), less GetTotalMemoryBudget's headroom

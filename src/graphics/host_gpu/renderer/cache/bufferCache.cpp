@@ -26,8 +26,6 @@ volatile std::atomic<uint32_t> kyty_local_copy_feedback_mode {1};
 // 1: RangeSet fast paths (rangeSet.h) for the GPU-modified range set.
 [[gnu::used]] volatile std::atomic<uint32_t> kyty_local_range_set_fast_mode {1};
 [[gnu::used]] volatile std::atomic<uint32_t> kyty_local_async_reprotect_mode {1};
-// Live switch (same-process A/B): ObtainBuffer's memo of repeated shader writes.
-[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_write_memo_mode {1};
 // 1: a guest readback whose window meets an image falls back to the request's own pages.
 [[gnu::used]] volatile std::atomic<uint32_t> kyty_local_readback_narrow_mode {1};
 // KYTY_READBACK_QUEUE (readback-queue.h): 1: readbacks whose bytes no in-flight GPU work writes
@@ -1266,28 +1264,15 @@ void BufferCache::ReportLodStats(void* dst, uint32_t size, bool reset) {
 
 static BufferCache* g_sync_cache = nullptr;
 
-// KYTY_BDA_SPARSE=1 (where the device has strict sparse residency buffers; off by default while a GPU hang in 2-2's
-// culling chain on an 8 GB card is open, the default it had: on with less than 12 GiB of video memory): the BDA page
-// table (an entry per 16 KiB page of the 1 TiB guest address space, 512 MiB) gets video memory only for the 64 KiB
-// pages of entries a buffer registration wrote (Buffer::MakeResident); the others read zero, as the whole table did.
-// The game's memory spans ~100 such pages (128 MiB of guest address space each).
-static MemoryUsage PageTableUsage(const GraphicContext& graphics) {
-	static const char* const value  = std::getenv("KYTY_BDA_SPARSE");
-	const bool               wanted = value != nullptr && value[0] != '\0' && value[0] != '0';
-	return wanted && graphics.sparse_residency_buffers ? MemoryUsage::SparseDeviceLocal : MemoryUsage::DeviceLocal;
-}
-
 // The guest addresses the BDA page table covers at first: 128 GiB, 64 MiB of video memory instead of the 512 MiB of
 // the whole 1 TiB. The PS5's kernel places mappings in its system-managed range by default (to 32 GiB); Demon's Souls
 // registers buffers there, by its executable (36 GiB) and at the start of the user range among its PRT pages (66 GiB).
 // 1-1 tours with 8 GB (KYTY_SIMULATE_VRAM_MB=8192) back to back: walk 63.6 -> 68.9 fps, spin 62.1 -> 67.7, points under
 // 60 fps 44 -> 24 of 84 (the route's middle third 54.3 -> 63.8, 27 of 29 points faster; its last third even: the room
 // filled up again). A registration past it grows it (GrowBdaTable; 1-1 starting at 12 GiB grew three times while
-// loading, no error). KYTY_BDA_TABLE_GIB=<n>: n GiB at first (tests of the growth). A sparse table is whole (its pages
-// get memory as entries are written).
-static uint64_t InitialBdaTableBytes(MemoryUsage usage) {
+// loading, no error). KYTY_BDA_TABLE_GIB=<n>: n GiB at first (tests of the growth).
+static uint64_t InitialBdaTableBytes() {
 	constexpr uint64_t Whole = BufferCache::BDA_PAGETABLE_SIZE;
-	if (usage == MemoryUsage::SparseDeviceLocal) return Whole;
 	const char* value   = std::getenv("KYTY_BDA_TABLE_GIB");
 	uint64_t    covered = value != nullptr && value[0] != '\0' ? std::strtoull(value, nullptr, 10) << 30u
 	                                                           : uint64_t {128} << 30u;
@@ -1296,19 +1281,17 @@ static uint64_t InitialBdaTableBytes(MemoryUsage usage) {
 }
 
 void BufferCache::WriteBdaEntries(uint64_t first, uint64_t count, const vk::DeviceAddress* entries) {
-	// (The first table's memory may have held other data: zero before its first entry. A sparse one is zeroed as its
-	// pages get memory.)
+	// (The first table's memory may have held other data: zero before its first entry.)
 	if (!m_bda_zeroed) {
 		m_bda_zeroed = true;
 		auto& table  = *m_bda_tables.front();
-		if (table.Usage() != MemoryUsage::SparseDeviceLocal) table.Fill(0, table.Size(), 0);
+		table.Fill(0, table.Size(), 0);
 	}
 	if (count == 0) return;
 	for (const auto& table: m_bda_tables) {
 		const uint64_t held = table->Size() / sizeof(vk::DeviceAddress);
 		if (first >= held) continue;
 		const uint64_t part = std::min(count, held - first);
-		table->MakeResident(first * sizeof(vk::DeviceAddress), part * sizeof(vk::DeviceAddress));
 		if (entries != nullptr) {
 			WriteDataBuffer(*table, first * sizeof(vk::DeviceAddress), entries, part * sizeof(vk::DeviceAddress));
 		} else {
@@ -1361,9 +1344,8 @@ BufferCache::BufferCache(GraphicContext& graphics, CommandScheduler& scheduler,
       m_device_buffer(graphics, scheduler, MemoryUsage::DeviceLocal, 128 * MiB),
       m_texture_cache(texture_cache), m_resources(resources) {
 	{
-		const auto usage = PageTableUsage(graphics);
-		m_bda_tables.push_back(
-		    std::make_unique<Buffer>(graphics, scheduler, usage, 0, AllFlags, InitialBdaTableBytes(usage)));
+		m_bda_tables.push_back(std::make_unique<Buffer>(graphics, scheduler, MemoryUsage::DeviceLocal, 0, AllFlags,
+		                                                InitialBdaTableBytes()));
 		m_bda_table.store(m_bda_tables.back().get(), std::memory_order_release);
 	}
 	m_scheduler.SetPrologueHook([this](vk::CommandBuffer command) { FlushPrologueCopies(command); });
@@ -2279,8 +2261,7 @@ std::pair<Buffer*, uint64_t> BufferCache::ObtainBuffer(uint64_t vaddr, uint64_t 
 	// standing 9.11 -> 8.91 ms render in the same process.)
 	auto& memo = m_write_memo[((vaddr >> 4u) ^ (size * 0x9e3779b97f4a7c15ull >> 40u)) % m_write_memo.size()];
 	if (is_written && memo.vaddr == vaddr && memo.size == size && memo.texel == is_texel_buffer &&
-	    memo.registration == RegistrationEpoch() && memo.coverage == m_gpu_coverage_epoch &&
-	    kyty_local_write_memo_mode.load(std::memory_order_relaxed) != 0) {
+	    memo.registration == RegistrationEpoch() && memo.coverage == m_gpu_coverage_epoch) {
 		if (auto* buffer = m_slot_buffers.try_get(memo.id); buffer != nullptr && !buffer->is_deleted && buffer->IsInBounds(vaddr, size)) {
 			TouchBuffer(*buffer);
 			InvalidateCopyFeedback(vaddr, size);
@@ -2995,31 +2976,6 @@ void BufferCache::RunGarbageCollector(bool collect) {
 	}
 	if (m_graphics.CanReportMemoryUsage()) {
 		m_total_used_memory = m_graphics.GetDeviceMemoryUsage();
-	}
-	if (KytyGcLiveBudget() && m_graphics.CanReportMemoryUsage()) {
-		static const uint64_t base_trigger       = m_trigger_gc_memory;
-		static const uint64_t base_critical      = m_critical_gc_memory;
-		static auto           kyty_budget_window = std::chrono::steady_clock::time_point {};
-		const auto            now                = std::chrono::steady_clock::now();
-		const uint64_t        budget             = KytyGcLiveBudgetValue(m_graphics);
-		if (now - kyty_budget_window >= std::chrono::seconds(2)) {
-			kyty_budget_window     = now;
-			constexpr uint64_t MiB = 1024ull * 1024;
-			const uint64_t     live_trigger  = budget > 2560 * MiB ? budget - 1536 * MiB : 1024 * MiB;
-			const uint64_t     live_critical = budget > 1536 * MiB ? budget - 512 * MiB : 1024 * MiB;
-			const uint64_t     trigger       = std::min(base_trigger, live_trigger);
-			const uint64_t     critical      = std::max(std::min(base_critical, live_critical), trigger + 256 * MiB);
-			const auto moved = [](uint64_t a, uint64_t b) { return (a > b ? a - b : b - a) >= (uint64_t {64} << 20u); };
-			if (moved(trigger, m_trigger_gc_memory) || moved(critical, m_critical_gc_memory)) {
-				std::printf("KYTYGCBUDGET buffer budget=%lluMB trigger=%lluMB critical=%lluMB used=%lluMB\n",
-				            static_cast<unsigned long long>(budget >> 20), static_cast<unsigned long long>(trigger >> 20),
-				            static_cast<unsigned long long>(critical >> 20),
-				            static_cast<unsigned long long>(m_total_used_memory >> 20));
-				std::fflush(stdout);
-			}
-			m_trigger_gc_memory  = trigger;
-			m_critical_gc_memory = critical;
-		}
 	}
 	if (m_total_used_memory < m_trigger_gc_memory) {
 		return;

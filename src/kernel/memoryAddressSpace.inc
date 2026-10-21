@@ -77,38 +77,17 @@ private:
 };
 #endif
 
-// Guest ranges that still hold their data but were mapped again with their view's protection:
-// the neighbours of a partly unmapped view (a Windows view cannot be split, so the whole view is
-// unmapped and its remaining parts mapped again) and views an unmap rolled back. The GPU
-// trackers' write and read protection of their pages was lost with the old view; without it CPU
-// writes to watched pages went unseen and the GPU kept using stale data (a frozen character
-// model). It goes back once the address-space lock is released (GuestAddressSpace::UnmapBacking;
-// the page manager protects through that lock).
-thread_local std::vector<std::pair<uint64_t, uint64_t>> g_remapped_views;
 // The view a partial unmap maps again, from its unmap to the end of UnmapBacking (InRemapWindow).
 static std::atomic<uint64_t> g_remap_window_begin {0};
 static std::atomic<uint64_t> g_remap_window_end {0};
 
-// kyty_local_protective_remap as UnmapBacking read it: its views are protected by ProtectRemapped or left to
-// ReapplyRemappedViews, not both.
-thread_local bool     g_protective_remap = true;
-thread_local uint32_t g_remapped_count   = 0;
-static bool ProtectiveRemap() {
-	return g_protective_remap;
-}
-
-// A view mapped again: counted, and left to ReapplyRemappedViews unless ProtectRemapped protected it.
-static void NoteRemapped(uint64_t vaddr, uint64_t size) {
+// Guest ranges that still hold their data, mapped again: the neighbours of a partly unmapped view (a Windows view
+// cannot be split, so the whole view is unmapped and its remaining parts mapped again) and views an unmap rolled back.
+// Each gets the GPU trackers' protection of its watched pages before it is published
+// (GuestBackingStore::ProtectRemapped); counted here for LiveCounters::RemappedViews.
+thread_local uint32_t g_remapped_count = 0;
+static void NoteRemapped() {
 	++g_remapped_count;
-	if (!g_protective_remap) g_remapped_views.emplace_back(vaddr, size);
-}
-
-static void ReapplyRemappedViews() {
-	for (const auto& [vaddr, size]: std::exchange(g_remapped_views, {})) {
-		if (g_gpu_resources != nullptr && IsGpuAddressRange(vaddr, size)) {
-			g_gpu_resources->ReapplyProtection(vaddr, size);
-		}
-	}
 }
 
 // Backing aliases bypass guest page protection. Invalidate hoisted preparation
@@ -601,8 +580,8 @@ public:
 				EXIT_IF(parked);
 				for (auto it = removed.rbegin(); it != removed.rend(); ++it) {
 					EXIT_IF(!MapExistingPlaceholderFixed(it->vaddr, it->size, it->backing_offset,
-					                                     it->mode, nullptr, ProtectiveRemap()));
-					NoteRemapped(it->vaddr, it->size);
+					                                     it->mode, nullptr, true));
+					NoteRemapped();
 				}
 				freed->resize(freed_before);
 				if (placeholder_preserved != nullptr) {
@@ -797,15 +776,15 @@ public:
 			}
 			if (left_size != 0) {
 				const bool mapped = MapExistingPlaceholderFixed(old.vaddr, left_size, old.backing_offset, old.mode,
-				                                                nullptr, ProtectiveRemap());
-				if (mapped) NoteRemapped(old.vaddr, left_size);
+				                                                nullptr, true);
+				if (mapped) NoteRemapped();
 				ok = mapped && ok;
 			}
 			if (right_size != 0) {
 				const bool mapped = MapExistingPlaceholderFixed(right_addr, right_size,
 				                                                old.backing_offset + (right_addr - old.vaddr), old.mode,
-				                                                nullptr, ProtectiveRemap());
-				if (mapped) NoteRemapped(right_addr, right_size);
+				                                                nullptr, true);
+				if (mapped) NoteRemapped();
 				ok = mapped && ok;
 			}
 			if (ok) {
@@ -825,9 +804,8 @@ public:
 			}
 			EXIT_IF(VirtualFree(reinterpret_cast<void*>(old.vaddr), old.size,
 			                    MEM_RELEASE | MEM_COALESCE_PLACEHOLDERS) == 0);
-			EXIT_IF(!MapExistingPlaceholderFixed(old.vaddr, old.size, old.backing_offset, old.mode, nullptr,
-			                                     ProtectiveRemap()));
-			NoteRemapped(old.vaddr, old.size);
+			EXIT_IF(!MapExistingPlaceholderFixed(old.vaddr, old.size, old.backing_offset, old.mode, nullptr, true));
+			NoteRemapped();
 			return false;
 		}
 		std::lock_guard lock(m_mutex);
@@ -921,8 +899,8 @@ public:
 			EXIT_IF(at != view_base + view_size);
 			for (const auto& entry: mapped) {
 				EXIT_IF(!MapExistingPlaceholderFixed(entry.vaddr, entry.size, entry.backing_offset, entry.mode, nullptr,
-				                                     ProtectiveRemap()));
-				NoteRemapped(entry.vaddr, entry.size);
+				                                     true));
+				NoteRemapped();
 			}
 			LiveCounters::Add(LiveCounters::ParkedSplits);
 		}
@@ -1374,7 +1352,7 @@ private:
 	// A view mapped again (MapExistingPlaceholderFixed, `protective`) gets the GPU trackers' protection of the pages a
 	// watcher holds at once. The views are busy (UnmapBacking), and every protection change of the trackers over them
 	// waits for that: their state is read without their regions' locks, and a change made meanwhile is applied after
-	// this. Given only after the lock (ReapplyRemappedViews), a CPU write to a watched page in between went
+	// this. Given back only after the lock, as it was before, a CPU write to a watched page in between went
 	// unseen. (The view keeps its own mode until here, a few system calls: one mapped read-only cannot be made writable
 	// later, and made read-only at once, the game's own writes to its unwatched pages faulted by the thousands.)
 	static void ProtectRemapped(uint64_t vaddr, uint64_t size, VirtualMemory::Mode mode) {
@@ -1802,7 +1780,6 @@ public:
 				uint64_t start = __rdtsc();
 				~UnmapHold() { LiveCounters::Add(LiveCounters::AddressSpaceUnmapHoldKt, (__rdtsc() - start) >> 10u); }
 			} unmap_hold;
-			g_protective_remap = kyty_local_protective_remap.load(std::memory_order_relaxed) != 0;
 			// The views over the range busy, the system calls without the lock (BusyUnlocked): a partial unmap of a big
 			// view held it for milliseconds (4.5 ms for a 52 MiB one, 1.5-5 ms a call late in a laptop session), every
 			// protection of the GPU trackers anywhere waiting behind it.
@@ -1845,10 +1822,7 @@ public:
 		}
 		if (g_remapped_count != 0) {
 			LiveCounters::Add(LiveCounters::RemappedViews, std::exchange(g_remapped_count, 0u));
-			if (const auto us = kyty_local_remap_window_us.load(std::memory_order_relaxed); us != 0)
-				std::this_thread::sleep_for(std::chrono::microseconds(us));
 		}
-		ReapplyRemappedViews();
 		g_remap_window_begin.store(0, std::memory_order_release);
 		return unmapped;
 	}
@@ -2216,7 +2190,6 @@ private:
 	void MaterializeParked(uint64_t vaddr, uint64_t size) {
 		uint64_t begin = UINT64_MAX, end = 0;
 		if (!m_backing->ParkedViews(vaddr, size, &begin, &end)) return;
-		g_protective_remap = kyty_local_protective_remap.load(std::memory_order_relaxed) != 0;
 		{
 			ExclusiveLock lock(m_mutex);
 			m_busy_done.wait(lock.Lock(), [&] { return !BusyUnlocked(begin, end - begin); });
@@ -2234,7 +2207,6 @@ private:
 		if (g_remapped_count != 0) {
 			LiveCounters::Add(LiveCounters::RemappedViews, std::exchange(g_remapped_count, 0u));
 		}
-		ReapplyRemappedViews();
 		g_remap_window_begin.store(0, std::memory_order_release);
 	}
 

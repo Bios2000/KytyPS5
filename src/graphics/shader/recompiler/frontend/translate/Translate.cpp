@@ -1012,7 +1012,6 @@ IR::Program TranslateProgram(const Decoder::Program& decoded, const CFG::Graph& 
 		LaneLocalProof proof;
 		result.lane_local =
 		    enabled && ProveWaveLaneLocal(decoded, cooperative_enabled && one_wave, proof, log ? &reason : nullptr);
-		result.lane_local_uniform_loads = result.lane_local && proof.uniform_loads;
 		if (result.lane_local && proof.Cooperative()) {
 			result.lane_cooperative     = true;
 			result.cooperative_reads    = std::move(proof.exchange_reads);
@@ -1025,7 +1024,6 @@ IR::Program TranslateProgram(const Decoder::Program& decoded, const CFG::Graph& 
 			                     : result.lane_cooperative ? fmt::format("yes (cooperative: {} lane reads, {} branches)",
 			                                                             result.cooperative_reads.size(),
 			                                                             result.cooperative_branches.size())
-			                     : proof.uniform_loads     ? std::string("yes (uniform loads)")
 			                                               : std::string("yes");
 			std::printf("LaneLocal CS %016llx: %s\n", static_cast<unsigned long long>(options.shader_hash), verdict.c_str());
 		}
@@ -1125,9 +1123,8 @@ IR::Program TranslateProgram(const Decoder::Program& decoded, const CFG::Graph& 
 			total_threads = std::max(workgroup->threads_num[0], 1u) *
 			                std::max(workgroup->threads_num[1], 1u) *
 			                std::max(workgroup->threads_num[2], 1u);
-			// (Also a lane-local program that may run two lanes per invocation after all: CompileProgram.)
-			if (options.wave_size == 64u && workgroup->host_subgroup_size == 32u &&
-			    (!result.lane_local || result.lane_local_uniform_loads) && total_threads % 64u != 0u) {
+			if (options.wave_size == 64u && workgroup->host_subgroup_size == 32u && !result.lane_local &&
+			    total_threads % 64u != 0u) {
 				initial_exec = entry_ir.ULessThan(builtin(IR::StageInputKind::LocalInvocationIndex),
 				                                  IR::U32(IR::Value(total_threads)));
 			}
