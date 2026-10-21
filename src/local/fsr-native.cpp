@@ -15,7 +15,9 @@
 
 #if defined(__linux__)
 #include <FidelityFX/host/backends/vk/ffx_vk.h>
+#include <FidelityFX/host/ffx_frameinterpolation.h>
 #include <FidelityFX/host/ffx_fsr3upscaler.h>
+#include <FidelityFX/host/ffx_opticalflow.h>
 
 // The FidelityFX Vulkan backend calls a few global Vulkan entry points. The emulator loads Vulkan at run time, so
 // ffx_linux_compat.h routes them here, to the emulator's dispatcher.
@@ -51,6 +53,18 @@ bool UpscalerRequested() {
 #if defined(__linux__)
 	static const bool requested = [] {
 		const char* value = std::getenv("KYTY_UPSCALER");
+		return value != nullptr && std::string_view(value) == "fsr";
+	}();
+	return requested;
+#else
+	return false;
+#endif
+}
+
+bool InterpolationRequested() {
+#if defined(__linux__)
+	static const bool requested = [] {
+		const char* value = std::getenv("KYTY_FRAMEGEN_BACKEND");
 		return value != nullptr && std::string_view(value) == "fsr";
 	}();
 	return requested;
@@ -275,9 +289,163 @@ struct Upscaler {
 	}
 };
 
+// FSR 3 frame interpolation (KYTY_FRAMEGEN_BACKEND=fsr).
+struct Interpolator {
+	Backend                backend;
+	alignas(64) FfxOpticalflowContext        optical_flow {};
+	alignas(64) FfxFrameInterpolationContext interpolation {};
+	uint32_t               shared_context = 0;
+	FfxResourceInternal    flow_vectors {}, scene_change {}, dilated_depth {}, dilated_motion {}, previous_depth {};
+	bool                   created = false, failed = false, reset = true;
+	vk::Extent2D           display {}, render {};
+	vk::Format             format = vk::Format::eUndefined;
+	uint64_t               frame_id = 0;
+
+	void Destroy(GraphicContext& graphics) {
+		if (!created) return;
+		WaitIdle(graphics);
+		auto& b = backend.backend;
+		for (auto* resource: {&flow_vectors, &scene_change, &dilated_depth, &dilated_motion, &previous_depth})
+			b.fpDestroyResource(&b, *resource, shared_context);
+		b.fpDestroyBackendContext(&b, shared_context);
+		ffxFrameInterpolationContextDestroy(&interpolation);
+		ffxOpticalflowContextDestroy(&optical_flow);
+		created = false;
+	}
+
+	bool Create(GraphicContext& graphics, const InterpolationInputs& inputs) {
+		display = inputs.backbuffer.extent;
+		render  = inputs.motion.extent;
+		format  = inputs.backbuffer.format;
+		KYTY_FSR_CHECK(*this, backend.Create(graphics, 3) ? FFX_OK : FFX_ERROR_BACKEND_API_ERROR);
+		auto& b = backend.backend;
+		FfxOpticalflowContextDescription flow {};
+		flow.backendInterface = b;
+		flow.resolution       = {display.width, display.height};
+		KYTY_FSR_CHECK(*this, ffxOpticalflowContextCreate(&optical_flow, &flow));
+		FfxFrameInterpolationContextDescription description {};
+		description.flags            = FFX_FRAMEINTERPOLATION_ENABLE_DEPTH_INVERTED | FFX_FRAMEINTERPOLATION_ENABLE_DEPTH_INFINITE;
+		description.maxRenderSize    = {render.width, render.height};
+		description.displaySize      = {display.width, display.height};
+		description.backBufferFormat = ffxGetSurfaceFormatVK(static_cast<VkFormat>(format));
+		description.previousInterpolationSourceFormat = description.backBufferFormat;
+		description.backendInterface                  = b;
+		KYTY_FSR_CHECK(*this, ffxFrameInterpolationContextCreate(&interpolation, &description));
+		KYTY_FSR_CHECK(*this, b.fpCreateBackendContext(&b, FFX_EFFECT_SHAREDRESOURCES, nullptr, &shared_context));
+		FfxOpticalflowSharedResourceDescriptions flow_resources {};
+		KYTY_FSR_CHECK(*this, ffxOpticalflowGetSharedResourceDescriptions(&optical_flow, &flow_resources));
+		KYTY_FSR_CHECK(*this, b.fpCreateResource(&b, &flow_resources.opticalFlowVector, shared_context, &flow_vectors));
+		KYTY_FSR_CHECK(*this, b.fpCreateResource(&b, &flow_resources.opticalFlowSCD, shared_context, &scene_change));
+		FfxFrameInterpolationSharedResourceDescriptions resources {};
+		KYTY_FSR_CHECK(*this, ffxFrameInterpolationGetSharedResourceDescriptions(&interpolation, &resources));
+		KYTY_FSR_CHECK(*this, b.fpCreateResource(&b, &resources.dilatedDepth, shared_context, &dilated_depth));
+		KYTY_FSR_CHECK(*this, b.fpCreateResource(&b, &resources.dilatedMotionVectors, shared_context, &dilated_motion));
+		KYTY_FSR_CHECK(*this, b.fpCreateResource(&b, &resources.reconstructedPrevNearestDepth, shared_context, &previous_depth));
+		created = true;
+		reset   = true;
+		Report("Frame generation: FSR 3 %ux%u, depth and motion %ux%u, 2x (FidelityFX SDK 1.1.4, built in)\n", display.width,
+		       display.height, render.width, render.height);
+		return true;
+	}
+
+	bool Record(GraphicContext& graphics, vk::CommandBuffer command, const InterpolationInputs& inputs,
+	            const FrameGen::UpscaleImage& output) {
+		if (failed) return false;
+		if (created && (display != inputs.backbuffer.extent || render != inputs.motion.extent || format != inputs.backbuffer.format))
+			Destroy(graphics);
+		if (!created && !Create(graphics, inputs)) return false;
+		reset |= inputs.reset;
+		// KYTY_FRAMEGEN_MV_SIGN=1 (a test): the game's vectors as they are. They point along the motion in UV units;
+		// FSR wants render pixels towards the previous position.
+		static const float mv_sign = [] {
+			const char* value = std::getenv("KYTY_FRAMEGEN_MV_SIGN");
+			return value != nullptr && std::atof(value) > 0 ? 1.0f : -1.0f;
+		}();
+		auto&      b    = backend.backend;
+		const auto list = ffxGetCommandListVK(static_cast<VkCommandBuffer>(command));
+		const auto color  = ToResource(inputs.backbuffer, L"KytyFgColor", false);
+		// (With a HUD-less image FSR interpolates that and takes the pixels that differ, the HUD's, from this frame.)
+		const bool has_hudless = inputs.hudless.image != nullptr;
+		const auto hudless     = has_hudless ? ToResource(inputs.hudless, L"KytyFgHudless", false) : FfxResource {};
+		const auto target = ToResource(output, L"KytyFgOutput", true);
+		const auto flow_vector    = b.fpGetResource(&b, flow_vectors);
+		const auto flow_scd       = b.fpGetResource(&b, scene_change);
+		const auto depth_dilated  = b.fpGetResource(&b, dilated_depth);
+		const auto motion_dilated = b.fpGetResource(&b, dilated_motion);
+		const auto depth_previous = b.fpGetResource(&b, previous_depth);
+
+		FfxFrameInterpolationPrepareDescription prepare {};
+		prepare.commandList             = list;
+		prepare.renderSize              = {render.width, render.height};
+		prepare.jitterOffset            = {inputs.jitter_px[0], inputs.jitter_px[1]};
+		prepare.motionVectorScale       = {mv_sign * static_cast<float>(render.width), mv_sign * static_cast<float>(render.height)};
+		prepare.frameTimeDelta          = inputs.frame_ms;
+		prepare.cameraNear              = inputs.near_plane;
+		prepare.cameraFar               = FLT_MAX;
+		prepare.viewSpaceToMetersFactor = 1.0f;
+		prepare.cameraFovAngleVertical  = inputs.fov_y;
+		prepare.depth                   = ToResource(inputs.depth, L"KytyFgDepth", false);
+		prepare.motionVectors           = ToResource(inputs.motion, L"KytyFgMotion", false);
+		prepare.frameID                 = frame_id;
+		prepare.dilatedDepth            = depth_dilated;
+		prepare.dilatedMotionVectors    = motion_dilated;
+		prepare.reconstructedPrevDepth  = depth_previous;
+		KYTY_FSR_CHECK(*this, ffxFrameInterpolationPrepare(&interpolation, &prepare));
+
+		FfxOpticalflowDispatchDescription flow {};
+		flow.commandList                = list;
+		flow.color                      = has_hudless ? hudless : color;
+		flow.opticalFlowVector          = flow_vector;
+		flow.opticalFlowSCD             = flow_scd;
+		flow.reset                      = reset;
+		flow.backbufferTransferFunction = FFX_BACKBUFFER_TRANSFER_FUNCTION_SRGB;
+		flow.minMaxLuminance            = {0.0f, 1.0f};
+		KYTY_FSR_CHECK(*this, ffxOpticalflowContextDispatch(&optical_flow, &flow));
+
+		FfxFrameInterpolationDispatchDescription dispatch {};
+		dispatch.commandList                     = list;
+		dispatch.displaySize                     = {display.width, display.height};
+		dispatch.renderSize                      = {render.width, render.height};
+		dispatch.currentBackBuffer               = color;
+		dispatch.currentBackBuffer_HUDLess       = hudless;
+		dispatch.output                          = target;
+		dispatch.interpolationRect               = {inputs.region.offset.x, inputs.region.offset.y,
+		                                            static_cast<int32_t>(inputs.region.extent.width),
+		                                            static_cast<int32_t>(inputs.region.extent.height)};
+		dispatch.opticalFlowVector               = flow_vector;
+		dispatch.opticalFlowSceneChangeDetection = flow_scd;
+		dispatch.opticalFlowBufferSize           = {flow_vector.description.width, flow_vector.description.height};
+		dispatch.opticalFlowScale = {1.0f / static_cast<float>(display.width), 1.0f / static_cast<float>(display.height)};
+		dispatch.opticalFlowBlockSize       = 8;
+		dispatch.cameraNear                 = inputs.near_plane;
+		dispatch.cameraFar                  = FLT_MAX;
+		dispatch.cameraFovAngleVertical     = inputs.fov_y;
+		dispatch.viewSpaceToMetersFactor    = 1.0f;
+		dispatch.frameTimeDelta             = inputs.frame_ms;
+		dispatch.reset                      = reset;
+		dispatch.backBufferTransferFunction = FFX_BACKBUFFER_TRANSFER_FUNCTION_SRGB;
+		dispatch.minMaxLuminance[0]         = 0.0f;
+		dispatch.minMaxLuminance[1]         = 1.0f;
+		dispatch.frameID                    = frame_id;
+		dispatch.dilatedDepth               = depth_dilated;
+		dispatch.dilatedMotionVectors       = motion_dilated;
+		dispatch.reconstructedPrevDepth     = depth_previous;
+		KYTY_FSR_CHECK(*this, ffxFrameInterpolationDispatch(&interpolation, &dispatch));
+		++frame_id;
+		const bool generated = !reset;
+		reset                = false;
+		return generated;
+	}
+};
+
 Upscaler& TheUpscaler() {
 	static auto* upscaler = new Upscaler; // (kept for the process: its contexts live as long as the device)
 	return *upscaler;
+}
+
+Interpolator& TheInterpolator() {
+	static auto* interpolator = new Interpolator;
+	return *interpolator;
 }
 
 } // namespace
@@ -285,8 +453,18 @@ Upscaler& TheUpscaler() {
 bool Upscale(GraphicContext& graphics, vk::CommandBuffer command, const FrameGen::UpscaleInputs& inputs) {
 	return UpscalerRequested() && TheUpscaler().Record(graphics, command, inputs);
 }
+
+bool Interpolate(GraphicContext& graphics, vk::CommandBuffer command, const InterpolationInputs& inputs,
+                 const FrameGen::UpscaleImage& output) {
+	return InterpolationRequested() && TheInterpolator().Record(graphics, command, inputs, output);
+}
 #else
 bool Upscale(GraphicContext& /*graphics*/, vk::CommandBuffer /*command*/, const FrameGen::UpscaleInputs& /*inputs*/) {
+	return false;
+}
+
+bool Interpolate(GraphicContext& /*graphics*/, vk::CommandBuffer /*command*/, const InterpolationInputs& /*inputs*/,
+                 const FrameGen::UpscaleImage& /*output*/) {
 	return false;
 }
 #endif

@@ -260,7 +260,7 @@ inline uint32_t PrimitiveCorners(Prospero::PrimitiveType primitive, bool& strip)
 // it is no interface draw into the canvas in a frame showing the 3D, or its vertices are not readable.
 inline uint32_t Classify(const HW::Context& ctx, const HW::VertexShaderInfo& vs, uint32_t first, uint32_t count,
                          Prospero::PrimitiveType primitive) {
-	if (count != 0 && FrameGen::UsesFsr()) NoteCanvas(ctx, vs);
+	if (count != 0 && FrameGen::FsrMarksHud()) NoteCanvas(ctx, vs);
 	if (::Loader::DemonsSoulsRenderSize::WideAspect() <= 0.0 || count == 0) return 0;
 	const auto& target = ctx.GetRenderTarget(0);
 	const auto  width  = CanvasWidthOf(ctx);

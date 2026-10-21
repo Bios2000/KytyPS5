@@ -1065,7 +1065,7 @@ void WindowContext::UpdateIcon() {
 	}
 }
 
-void WindowContext::UpdateTitle() {
+void WindowContext::UpdateTitle(uint32_t presented, const char* generator) {
 	static char title[128];
 	static char title_id[12];
 	static char app_ver[12];
@@ -1078,7 +1078,9 @@ void WindowContext::UpdateTitle() {
 	static uint64_t fps_start   = Common::Timer::QueryPerformanceCounter();
 	static uint64_t frame_num   = 0;
 	static uint64_t fps_frames  = 0;
+	static uint64_t fps_shown   = 0; // images shown, generated ones included
 	static double   current_fps = 0.0;
+	static double   shown_fps   = 0.0;
 
 #if KYTY_BUILD == KYTY_BUILD_DEBUG
 	static constexpr auto build_type = "Debug";
@@ -1092,11 +1094,14 @@ void WindowContext::UpdateTitle() {
 	const auto frequency = Common::Timer::QueryPerformanceFrequency();
 	frame_num++;
 	fps_frames++;
+	fps_shown += presented;
 	if (now - fps_start >= frequency) {
 		current_fps = static_cast<double>(fps_frames) * static_cast<double>(frequency) /
 		              static_cast<double>(now - fps_start);
+		shown_fps   = static_cast<double>(fps_shown) * static_cast<double>(frequency) / static_cast<double>(now - fps_start);
 		fps_start   = now;
 		fps_frames  = 0;
+		fps_shown   = 0;
 	}
 
 	// Twice a second at most, and never waiting for the main thread (PostToMainThread): the title is set while the
@@ -1112,6 +1117,10 @@ void WindowContext::UpdateTitle() {
 	    (has_title ? title : ""), (has_title ? ", " : ""), (has_title_id ? title_id : ""),
 	    (has_title_id ? ", " : ""), (has_app_ver ? app_ver : ""), (has_app_ver ? " " : ""),
 	    device_name, processor_name, frame_num, current_fps);
+	// (The game's frame rate first, the rate shown with the generated frames after it.)
+	if (generator != nullptr && shown_fps > current_fps + 0.5) {
+		text += fmt::format(" ({}: {:.0f})", generator, shown_fps);
+	}
 	if (const auto waypoints = Loader::DemonsSoulsWarp::RecordedWaypoints(); waypoints != 0) {
 		text += fmt::format(", waypoints: {}", waypoints);
 	}

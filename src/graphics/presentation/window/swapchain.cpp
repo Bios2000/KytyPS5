@@ -20,6 +20,7 @@
 #include "frame-gen.h"
 #include "screenshot.h"
 #include "anti-lag.h"
+#include "fsr-native.h"
 #include "frame-gen-hudless.h"
 #include "local-platform.h"
 #include "perf-overlay.h"
@@ -566,7 +567,7 @@ struct Presenter::Impl {
 				std::snprintf(title.data(), title.size(), "%.0f FPS",
 				              (seconds >= 1.0 ? hud_frames / seconds : game) * presents);
 				std::snprintf(detail.data(), detail.size(), "%s Frame Generation %ux  |  game %.0f fps",
-				              FrameGen::UsesFsr() ? "FSR 3" : "DLSS", presents, game);
+				              FrameGen::UsesFsr() || FsrNative::InterpolationRequested() ? "FSR 3" : "DLSS", presents, game);
 			} else {
 				std::snprintf(title.data(), title.size(), "%.0f FPS", game);
 			}
@@ -765,7 +766,9 @@ struct Presenter::Impl {
 				    (static_cast<float>(hud->drawn.offset.x - region.offset.x) + static_cast<float>(hud->drawn.extent.width) + margin) / w,
 				    (static_cast<float>(hud->drawn.offset.y - region.offset.y) + static_cast<float>(hud->drawn.extent.height) + margin) / h);
 			}
-			swapchain.RecordPresentCommands(command, frame.image, draw_system_overlay, frame.scene, nullptr, &composed,
+			// (With the frame's inputs FSR 3 built in gets its HUD-less image too: FrameGen::RecordHudless.)
+			swapchain.RecordPresentCommands(command, frame.image, draw_system_overlay, frame.scene,
+			                                frame.fg.valid && !frame.reusing_last ? &frame.fg : nullptr, &composed,
 			                                composed_view);
 			if (FrameGen::HudlessOn() && !frame.reusing_last) {
 				FrameGen::ScaleHudless(window.graphic_ctx, command.Handle(), frame.fg, extent, swapchain.PresentRegion(),
@@ -794,7 +797,7 @@ struct Presenter::Impl {
 			}
 			const FrameGen::UpscaleImage backbuffer {composed.image, composed_view, vk::ImageLayout::eGeneral, format, extent,
 			                                         composed.usage, 0, 0};
-			count = FrameGen::Generate(command.Handle(), frame.fg.valid && !frame.reusing_last ? &frame.fg : nullptr,
+			count = FrameGen::Generate(window.graphic_ctx, command.Handle(), frame.fg.valid && !frame.reusing_last ? &frame.fg : nullptr,
 			                           backbuffer, swapchain.PresentRegion(), outputs);
 			// (A live `screenshot`: the finished frame and the frame generated before it.)
 			const auto shot      = Screenshot::Take();
@@ -858,7 +861,8 @@ struct Presenter::Impl {
 		}
 		FrameGen::NotePresented(shown + 1);
 		presented_overlay_revision.store(overlay_visual.revision, std::memory_order_release);
-		window.UpdateTitle();
+		window.UpdateTitle(shown + (ok ? 1u : 0u),
+		                   FsrNative::InterpolationRequested() || FrameGen::UsesFsr() ? "FSR 3 FG" : "DLSS-G");
 		frames.Release(&frame, true);
 		return true;
 	}
@@ -1271,10 +1275,11 @@ void Swapchain::RecordPresentCommands(CommandBuffer& command, VulkanImage& sourc
 	vk_command.blitImage(source.image, vk::ImageLayout::eTransferSrcOptimal,
 	                     dst_image, vk::ImageLayout::eTransferDstOptimal, 1, &region,
 	                     vk::Filter::eLinear);
-	// KYTY_FRAMEGEN_BACKEND=fsr: the HUD-less image from this, before the system overlay (which counts as HUD then).
-	if (FrameGen::OwnsSwapchain() && target == nullptr) {
+	// KYTY_FRAMEGEN_BACKEND=fsr: the HUD-less image from this, before the system overlay (which counts as HUD then); the
+	// Windows backend's of the swapchain image, FSR 3 built in's of the composed frame (`target`).
+	if (fsr_inputs != nullptr && (FrameGen::OwnsSwapchain() ? target == nullptr : target != nullptr)) {
 		FrameGen::RecordHudless(m_window.graphic_ctx, vk_command, fsr_inputs, dst_image, m_extent,
-		                        m_present_region);
+		                        m_present_region, m_format);
 	}
 
 	vk::ImageMemoryBarrier to_present {};
