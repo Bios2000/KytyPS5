@@ -1,4 +1,4 @@
-param([string]$Label = 'run', [int]$Rounds = 3, [string]$Exe = '', [switch]$NoAot, [string[]]$Extra = @(),
+param([string]$Label = 'run', [int]$Rounds = 3, [string]$Exe = '', [string[]]$Extra = @(),
       [switch]$KeepRunning, [string]$PresentMode = '', [int]$Vblank = 0, [string[]]$Set = @(),
       [string]$Patch = '', [switch]$Fullscreen, [switch]$Hdr, [switch]$ShotOnly, [switch]$NoWalk,
       [int]$StartupSeconds = 100, [int]$StartupAttempts = 3, [switch]$NoPrecompile, [string]$Config = '',
@@ -131,7 +131,6 @@ python tools\local\bench-windows.py reset
 if ($LASTEXITCODE -ne 0) { 'baseline save not installed: run python tools\local\bench-windows.py prepare'; exit 1 }
 $params = @{}
 if ($Exe) { $params['Exe'] = $Exe }
-if ($NoAot) { $params['NoAot'] = $true }
 if ($PresentMode) { $params['PresentMode'] = $PresentMode }
 if ($Vblank -gt 0) { $params['Vblank'] = $Vblank }
 if ($Set.Count) { $params['Set'] = $Set }

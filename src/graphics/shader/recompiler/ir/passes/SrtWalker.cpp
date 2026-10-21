@@ -4,7 +4,6 @@
 #include "graphics/shader/recompiler/ir/ShaderIR.h"
 #include "graphics/shader/recompiler/ir/passes/LinearSrt.h"
 #include "live-census.h"
-#include "native-resource-aot.h"
 #include "native-resource-runtime.h"
 
 #include <algorithm>
@@ -19,7 +18,6 @@
 #include <unordered_set>
 
 extern "C" {
-volatile std::atomic<uint32_t> kyty_local_srt_native_mode {1};
 volatile std::atomic<uint32_t> kyty_local_srt_predicate_mode {1};
 volatile std::atomic<uint32_t> kyty_local_preparation_scratch_mode {1};
 volatile std::atomic<uint32_t> kyty_local_preparation_lookup_mode {1};
@@ -1388,7 +1386,6 @@ static std::shared_ptr<LinearSrtPlan> BuildControlledLinearSrt(const ResourcePla
                                  ValueOpcodeName(compiler.failed_op));
             return {};
         }
-        PrepareLinearSrtAot(*leaf);
         root->add_carry |= leaf->add_carry;
         root->control_variants.push_back(std::move(leaf));
     }
@@ -1403,7 +1400,6 @@ void BuildLinearSrtPlan(ResourcePlan& program) {
     auto compiled=std::make_shared<LinearSrtPlan>();
     LinearSrtCompiler compiler(program,*compiled);
     if (compiler.Build()) {
-        PrepareLinearSrtAot(*compiled);
         program.linear_srt=std::move(compiled);
         return;
     }
@@ -1480,7 +1476,6 @@ static bool EvaluateLinearSrtOriginal(const LinearSrtPlan& plan,const SrtRuntime
 static bool EvaluateLinearSrt(const LinearSrtPlan& plan,const SrtRuntime& runtime,
                              std::vector<DescriptorValue>& results,std::vector<uint32_t>& flat,
                              std::vector<uint8_t>& active_sources) {
-    if (const auto native = LocalNativeResource::Try(plan, runtime, results, flat, active_sources)) return *native;
     return EvaluateLinearSrtOriginal(plan, runtime, results, flat, active_sources);
 }
 

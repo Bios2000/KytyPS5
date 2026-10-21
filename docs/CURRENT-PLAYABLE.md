@@ -13,7 +13,7 @@
 .\run-windows.ps1 -DryRun                        # 只打印环境变量和命令
 ```
 
-其他参数：`-NoAot`、`-NoRedZone`、`-Set KEY=VALUE`（设一个模拟器开关；默认值就是发布设置，见
+其他参数：`-NoRedZone`、`-Set KEY=VALUE`（设一个模拟器开关；默认值就是发布设置，见
 `src/local/performance-switches.h`，`=0` 关掉一条路径做 A/B）、
 `-Patch <cheat.json>`（etaHEN 格式补丁）、`-PresentMode`、`-Vblank`、`-Game <游戏目录>`（记在 `game-path.txt`，
 都找不到时弹出选择框）、`-Affinity <十六进制掩码>`。
@@ -31,7 +31,7 @@
   `run.cmd`、`launcher.cmd`、`precompile.cmd`、`launch.json`（= `run-windows.json`：命令行）、生成种子用的渲染状态表
   （`tools/local/static-precompile/pass-states.json`）和给测试者的 `README.md`（源文件 `docs/PORTABLE-README.md`）。只在 Actions 页
   Run workflow 或推 `v*` tag 时编译并发布 release（标为 latest，README 顶部链接到它）；推送代码不触发编译。
-  不含游戏、存档、着色器缓存（按 GPU+驱动区分）、Streamline、`srt-aot.dll` 和种子文件（含游戏的 shader 代码）：
+  不含游戏、存档、着色器缓存（按 GPU+驱动区分）、Streamline 和种子文件（含游戏的 shader 代码）：
   首次启动由 `run-windows.ps1` 从玩家自己的游戏文件生成 `seeds-<标题>_<版本>.seeds`（预编译程序的 `--make-seeds`：
   `precompile.py seeds` 的 C++ 移植，输出逐字节相同，不再需要 Python + numpy）。
   种子、静态缓存、预取输入和预热录制都按游戏版本命名（`<标题>_<版本>`：1.05 与 1.07 只有 10/约 21000 个 shader
@@ -41,8 +41,6 @@
   GPU+驱动），预取输入缺失或过期时自动生成（首次运行、更新驱动后）。`run.cmd` 带 `-Prompt`：静态缓存没做或游戏版本不是
   已测试的 PPSA01341 01.007.000 / 01.005.000 时先弹窗（先预编译 / 直接开始 / 退出，可勾选不再提示，记在 `no-precompile-prompt.txt`）。
 - PGO：见 [tools/local/PGO.md](../tools/local/PGO.md)（发布前和一批热路径改动后重新训练）。
-- SRT AOT：`python tools\local\compile-srt-aot-windows.py <Linux 库目录>` 用同一批 unit-*.cpp 编出 `srt-aot.dll`；
-  启动器把配置里的 `.so` 路径自动换成同目录的 `.dll`（约 +1.5%）。
 - 驱动管线缓存与预热：所有构建共用一个固定的 `KYTY_DRIVER_CACHE_KEY`（模拟器默认值），缓存在
   `_PipelineCache\local\<key>\`；驱动按 SPIR-V 和状态找管线，新构建复用没改过的着色器的管线。预热输入按"驱动版本+UUID"
   分目录，当前签名没有文件时自动接管同一游戏、同一 GPU 最新的文件。预热在游戏旁边进行（`-Precompile` 时在前面，按

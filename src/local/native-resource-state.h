@@ -5,8 +5,6 @@
 #include <cstdint>
 
 extern "C" {
-// 1: SRT outputs come from the ahead-of-time compiled linear plan.
-extern volatile std::atomic<uint32_t> kyty_local_srt_native_mode;
 // 1: a plan with one control-flow condition selects its variant through the
 // compiled predicate instead of the interpreter.
 extern volatile std::atomic<uint32_t> kyty_local_srt_predicate_mode;

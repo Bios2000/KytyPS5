@@ -62,7 +62,6 @@ param(
 	[switch]$Precompile,
 	[int]$Threads = 0,
 	[switch]$NoRedZone,
-	[switch]$NoAot,
 	[string]$PresentMode = '',
 	[int]$Vblank = 0,
 	[switch]$Fps120,
@@ -225,36 +224,10 @@ if ($Patch) { Set-Option '--game-patch' (Resolve-Path $Patch).Path }
 # then corrupt guest locals; --redzone rewrites the guest's red-zone accesses at load time.
 if (!$NoRedZone) { $options.Add('--redzone') }
 
-# Environment switches: the config's (the emulator's own defaults are the release settings). The ahead-of-time SRT
-# library of a Linux config is a .so: use the DLL built from the same plan sources
-# (tools\local\compile-srt-aot-windows.py <library dir>).
+# Environment switches: the config's (the emulator's own defaults are the release settings).
 $environment = [ordered]@{}
 foreach ($property in $launch.environment.PSObject.Properties) {
-	if ($property.Name -eq 'KYTY_SRT_AOT_LIBRARY') {
-		if ($NoAot) { continue }
-		$relative = ([string]$property.Value -replace '^.*?/_Build/', '_Build/') -replace 'srt-aot\.so$', 'srt-aot.dll'
-		$dll = Join-Path $PSScriptRoot $relative
-		# A library built on Windows from this tree's own plan exports (KYTY_SRT_AOT_EXPORT, then
-		# compile-srt-aot-windows.py) matches plans the Linux one misses: the walk's plans
-		# changed since it was built (28% of them ran in the interpreter).
-		$windows = Get-ChildItem "$PSScriptRoot\_Build\srt-aot\windows-libraries\*\srt-aot.dll" -ErrorAction SilentlyContinue |
-			Sort-Object LastWriteTime -Descending | Select-Object -First 1
-		if ($windows) { $dll = $windows.FullName }
-		if (Test-Path $dll) {
-			$environment[$property.Name] = (Resolve-Path $dll).Path
-		} else {
-			Write-Host "SRT AOT: $relative missing; build it with tools\local\compile-srt-aot-windows.py"
-		}
-		continue
-	}
 	$environment[$property.Name] = [string]$property.Value
-}
-# A build tree with an SRT AOT library built here (tools\local\compile-srt-aot-windows.py) uses it also when
-# the config names none (run-windows.json: release packages have none).
-if (!$NoAot -and !$environment.Contains('KYTY_SRT_AOT_LIBRARY')) {
-	$windows = Get-ChildItem "$PSScriptRoot\_Build\srt-aot\windows-libraries\*\srt-aot.dll" -ErrorAction SilentlyContinue |
-		Sort-Object LastWriteTime -Descending | Select-Object -First 1
-	if ($windows) { $environment['KYTY_SRT_AOT_LIBRARY'] = $windows.FullName }
 }
 
 # CPU affinity: -Affinity, else the config's list (this PC's leaves CPUs 4 and 5 out), else every

@@ -717,7 +717,7 @@ struct PipelineCache::ProgramCache {
 			std::vector<PrefetchedModule>                     modules;
 			// The plan in the scratch file instead (zstd-compressed ResourcePlanSerial bytes): `plan` stays empty until
 			// the game takes the group over (LoadSpilledPlan). Its linear SRT plan stays here: rebuilding it (its code
-			// generated, its AOT function looked up) took ~1 ms of the render thread's per plan; the plan's values ~0.2.
+			// generated) took up to ~1 ms of the render thread's per plan; the plan's values ~0.2.
 			uint64_t                                                          plan_offset = 0;
 			uint32_t                                                          plan_bytes = 0, plan_raw = 0;
 			std::shared_ptr<const ShaderRecompiler::IR::LinearSrtPlan>       plan_linear;
