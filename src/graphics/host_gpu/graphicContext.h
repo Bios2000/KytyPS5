@@ -34,7 +34,6 @@ struct GraphicContext {
 	bool                               memory_budget_ext_enabled             = false;
 	// VK_EXT_memory_priority, enabled only for KYTY_SIMULATE_VRAM_MB (vma.cpp).
 	bool                               memory_priority_enabled               = false;
-	bool                               rt_extensions_enabled                 = false;
 	bool                               compute_subgroup_size_control_enabled = false;
 	// A pipeline may require 64-lane subgroups of its pixel shader (KYTY_PS_WAVE64).
 	bool                               fragment_wave64_requirable            = false;
@@ -191,10 +190,6 @@ struct GraphicContext {
 	}
 	std::vector<vk::DeviceMemory> simulation_ballast;
 	uint64_t                      simulation_ballast_bytes = 0;
-	void                   AppendHardwareRayTracingDeviceExtensions(
-	    const std::vector<vk::ExtensionProperties>& available_extensions,
-	    std::vector<const char*>&                   device_extensions);
-	void LoadHardwareRayTracingFunctions() const;
 
 	uint32_t screen_width  = 0;
 	uint32_t screen_height = 0;

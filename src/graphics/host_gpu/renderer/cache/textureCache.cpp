@@ -40,7 +40,6 @@
 #include <thread>
 #include <tuple>
 #include <vulkan/vulkan_format_traits.hpp>
-#include <xxhash.h>
 
 [[gnu::used]] volatile std::atomic<uint32_t> kyty_local_write_window_handoff_mode {1};
 [[gnu::used]] volatile std::atomic<uint32_t> kyty_local_image_granules_mode {2};

@@ -134,8 +134,6 @@ endif()
 project(Kyty${KYTY_PROJECT_NAME}${CMAKE_BUILD_TYPE}${KYTY_COMPILER} VERSION 0.3.0)
 
 include_directories(
-	${KYTY_THIRD_PARTY_DIR}/gtest/include
-	${KYTY_THIRD_PARTY_DIR}/gtest
 	${KYTY_THIRD_PARTY_DIR}/fmt/include
 	${KYTY_THIRD_PARTY_DIR}/magic_enum/include/magic_enum
 	${PROJECT_BINARY_DIR}
@@ -870,8 +868,8 @@ endif()
 target_link_libraries(kyty_emulator ${CMAKE_DL_LIBS})
 target_include_directories(kyty_emulator PRIVATE ${inc_headers})
 
-# Local frame generation experiments (src/local/frame-gen.cpp): the NVIDIA Streamline SDK when it
-# was unpacked under _Build/deps (never part of the repository). Its DLLs are loaded at run time.
+# Frame generation (src/local/frame-gen.cpp): the NVIDIA Streamline SDK when it was unpacked under _Build/deps
+# (never part of the repository). Its DLLs are loaded at run time.
 if (WIN32)
 	set(KYTY_STREAMLINE_SDK "${CMAKE_CURRENT_SOURCE_DIR}/_Build/deps/streamline/sdk" CACHE PATH
 	    "NVIDIA Streamline SDK for KYTY_FRAMEGEN (local only)")

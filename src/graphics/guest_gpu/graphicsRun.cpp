@@ -1714,9 +1714,6 @@ void CommandProcessor::DispatchDirect(uint32_t thread_group_x, uint32_t thread_g
 	m_sh_ctx.SetCsWaveSize(Pm4::ComputeWaveSize(mode));
 
 	uint32_t frame_num = 0;
-	// uint32_t local_x   = 1;
-	// uint32_t local_y   = 1;
-	// uint32_t local_z   = 1;
 
 	{
 		CheckBuffer();
@@ -1740,9 +1737,6 @@ void CommandProcessor::DispatchDirect(uint32_t thread_group_x, uint32_t thread_g
 		}
 
 		const auto& cs = m_sh_ctx.GetCs().cs_regs;
-		// local_x        = std::max(cs.num_thread_x, 1u);
-		// local_y        = std::max(cs.num_thread_y, 1u);
-		// local_z        = std::max(cs.num_thread_z, 1u);
 		if (cs.wave_size == 64u) {
 			static std::atomic_bool logged_wave64_shader {false};
 			if (!logged_wave64_shader.exchange(true, std::memory_order_relaxed)) {
@@ -1758,28 +1752,6 @@ void CommandProcessor::DispatchDirect(uint32_t thread_group_x, uint32_t thread_g
 		                                                     thread_group_y, thread_group_z, mode,
 		                                                     indirect_args);
 	}
-
-	/*constexpr uint32_t DispatchInitiatorUseThreadDimensions = 1u << 5u;
-	auto               group_count = [](uint32_t threads, uint32_t group_size) {
-	    return (threads == 0
-	                ? 0u
-	                : (threads + std::max(group_size, 1u) - 1u) / std::max(group_size, 1u));
-	};
-
-	auto groups_x = thread_group_x;
-	auto groups_y = thread_group_y;
-	auto groups_z = thread_group_z;
-	if ((mode & DispatchInitiatorUseThreadDimensions) != 0) {
-	    groups_x = group_count(thread_group_x, local_x);
-	    groups_y = group_count(thread_group_y, local_y);
-	    groups_z = group_count(thread_group_z, local_z);
-	}
-
-	const uint64_t invocations =
-	    static_cast<uint64_t>(groups_x) * groups_y * groups_z * local_x * local_y * local_z;
-	if (invocations != 0) {
-	    BufferFlushAndWait();
-	}*/
 }
 
 void CommandProcessor::DispatchIndirect(uint32_t data_offset, uint32_t mode) {
