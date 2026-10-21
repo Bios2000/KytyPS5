@@ -329,6 +329,21 @@ time.
 
 The CMake source root is the repository root.
 
+#### PGO on Linux
+
+`tools/pgo/kyty.profdata` is made by clang-cl and matches almost nothing in a Linux build (MSVC-mangled names), so
+a Linux PGO build needs its own profile. Use fresh build directories: `KYTY_CMAKE_ARGS` only applies to the first
+configure.
+
+1. An instrumented build: `KYTY_BUILD_DIR=_Build/linux-pgogen KYTY_CMAKE_ARGS=-DKYTY_PGO_GENERATE=ON ./build-linux.sh`
+2. Play with it for 10-15 minutes (it runs slower). The emulator exits without writing a profile, so write it with
+   the live command `pgo <file>`: start the emulator with `KYTY_LIVE_FILE=<command file>` and put
+   `id <n>` and `pgo /absolute/path/kyty.profraw` on two lines in that file, with a new `id` each time. The counters
+   add up, so the last write has the whole session. Don't give `KYTY_LIVE_FILE` to `run_ds.sh`: its stutter capture
+   writes to the same file. Set it in a small wrapper script passed as `KYTY_BIN` instead.
+3. Merge and build: `llvm-profdata merge -o kyty-linux.profdata *.profraw`, then
+   `KYTY_BUILD_DIR=_Build/linux-pgo KYTY_CMAKE_ARGS=-DKYTY_PGO_USE=$PWD/kyty-linux.profdata ./build-linux.sh`
+
 ### Building on macOS
 
 macOS builds target x86-64 and run under Rosetta 2 on Apple Silicon, so the PS5's x86-64 game
