@@ -291,12 +291,33 @@ Default keyboard layout:
 | Enter | OPTIONS |
 | Backspace / Tab | Left / right half of the touch pad |
 | F7 | Camera with the mouse (press again to release the mouse) |
-| Space | **Pause / resume the emulation** (careful not to hit it by accident) |
+| Space, Pause | **Pause / resume the emulation** (careful not to hit Space by accident; once your own keys give Space to the game, only Pause) |
 | F8 | The emulator's overlay: Off, Frame rate, Detailed (the launcher's "Overlay" is where it starts) |
 | F9 | **Debug snapshot**: pauses the game and saves the picture on screen and where you are (`_DebugSnapshots\<date-time>\`: `screen.png`, `info.txt` with the position, the run's log and the switches); F9 again resumes. Attach the folder to an issue when something looks wrong |
 | F11, Alt+Enter | Toggle full screen |
 
 The keyboard has no L2 / R2 by default: use a gamepad when you need them.
+
+### Your own keys
+
+Add `"--keymap", "<control>=<key>"` pairs to the `"command"` list in `launch.json` (after `"kyty_emulator.exe"`).
+With any of them, only your own keys work on the keyboard (none of the layout above):
+
+```json
+"--keymap", "LeftStickUp=W",
+"--keymap", "Circle=Space",
+"--keymap", "L1=Left Shift",
+"--keymap", "R1=Mouse:Left",
+"--keymap", "MouseSensitivity=1.5",
+```
+
+- Controls: `Cross Circle Square Triangle L1 R1 L2 R2 L3 R3 Options Up Down Left Right TouchPad TouchPadRight`,
+  `LeftStickUp/Down/Left/Right`, `RightStickUp/Down/Left/Right`.
+- Keys: their names on the keyboard (`E`, `Tab`, `Space`, `Escape`, `Left Shift`, `Left Ctrl`, `Return`, ...; also
+  written without the space, as `LeftShift`), or `Mouse:Left`, `Mouse:Right`, `Mouse:Middle`, `Mouse:X1`, `Mouse:X2`.
+- F7, F8, F9 and F11 stay the emulator's. A line it cannot use is skipped, and the run log says which and why
+  (`Input mapping skipped: ...`).
+- An update's `launch.json` replaces yours: keep a copy of your lines.
 
 ## Files and folders
 
