@@ -3279,6 +3279,13 @@ void PipelineCache::InitializeDriverCache() {
 		PipelineCacheLog("Vulkan pipeline cache: disabled (non-Release build)");
 		return;
 	}
+#ifdef KYTY_STATIC_PRECOMPILE
+	// None in the precompile program: its shards compile into caches of their own. With the releases' key built in
+	// (83bc14df) it loaded the game's, whose data holds the compression dictionary NVIDIA's driver trained in play: every
+	// shard then compressed its pipelines with that from the first one on, kept none and split without end (issue #107).
+	PipelineCacheLog("Vulkan pipeline cache: none in the precompile program");
+	return;
+#endif
 	const std::string_view git_hash     = KYTY_GIT_HASH;
 	const std::string_view git_revision = KYTY_GIT_REVISION;
 	// The key of the driver pipeline cache (_PipelineCache/local/<key>), one for every build: the driver finds a

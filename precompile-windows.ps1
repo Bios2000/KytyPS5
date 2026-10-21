@@ -29,8 +29,9 @@
 # are merged into the static cache at the end. The shards are small (-Shards, about 100 pipelines each):
 # after a few hundred pipelines NVIDIA compresses binaries with a dictionary of its own, which only that
 # PC reads (pipelineBinaries.h); a shard stops at 160 (KYTY_PRECOMPILE_SHARD_CAP) or where the dictionary came
-# anyway, leaves the rest (exit code 3) and runs again as two. A dictionary from a shard's first pipeline on came
-# from the driver's own cache, which then ends the run (issue #107: it splits every shard without end).
+# anyway, leaves the rest (exit code 3) and runs again as two. A dictionary from a shard's first pipeline on was the
+# driver's before the shard compiled anything (issue #107: the game's driver cache, which v20261021's program loaded),
+# which no smaller shard escapes: the run ends.
 # recorded-<title>_<version>.seeds next to the seed file (-Recorded) adds the specializations of
 # recorded play; a PC without a recording of its own (a release) gets those of the specialization hints the release
 # ships (tools\local\static-precompile\hints-<title>_<version>.hints: recordings without the game's code), completed
@@ -385,13 +386,12 @@ while ($first.Count -or $second.Count -or $running.Count) {
 		$running.Remove($name)
 		Remove-NvidiaCache $process
 		if ($process.ExitCode -eq 3) {
-			# NVIDIA's dictionary from the shard's first pipeline on: the driver has it from its own cache, and every
-			# smaller shard would too (issue #107).
+			# NVIDIA's dictionary from the shard's first pipeline on: the driver had it before the shard compiled anything,
+			# and every smaller shard would too (issue #107).
 			if (Select-String -LiteralPath "$logs\$name.out.log" -Pattern 'dictionary from here on (after 0 captured' -SimpleMatch -Quiet) {
-				throw ("$name : NVIDIA's driver compressed even its first pipeline with a dictionary, which comes from the " +
-					"driver's own shader cache, so the precompile cannot keep its pipelines. Close this window, delete the folders " +
-					"GLCache and DXCache in $env:LOCALAPPDATA\NVIDIA (the driver's shader caches; games make theirs again) and " +
-					"start the precompile again: what it finished is kept. Logs: $logName")
+				throw ("$name : NVIDIA's driver compressed even its first pipeline with a dictionary it had before, so the " +
+					"precompile cannot keep its pipelines and smaller shards would not help. Please report it in issue #107 " +
+					"(github.com/chenxiao07/KytyPS5) with the logs in $logName; what the precompile finished is kept.")
 			}
 			$i, $n = [int[]]($shard -split '/')
 			if ($n -ge 65536) { throw "$name cannot be split further; logs: $logName" }

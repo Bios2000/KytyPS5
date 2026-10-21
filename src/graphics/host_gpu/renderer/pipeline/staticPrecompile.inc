@@ -649,9 +649,8 @@ bool PipelineCache::WarmSeeds(const PrecompileOptions& args, size_t& left_out) {
 	}
 	// NVIDIA trains its compression dictionary once a process has made a few hundred pipelines (230 to 319 here), and
 	// the captures after it are left out (PipelineBinaryWriter). A shard stops well before, after capture_cap captures
-	// (KYTY_PRECOMPILE_SHARD_CAP, default 160 on NVIDIA; 0: none), its other work items left to its halves (exit 3): on
-	// some PCs the shards share the driver's cache, and one shard's dictionary reached every later shard from its
-	// first pipeline on, splitting them without end (issue #107).
+	// (KYTY_PRECOMPILE_SHARD_CAP, default 160 on NVIDIA; 0: none), its other work items left to its halves (exit 3),
+	// instead of compiling pipelines it cannot keep.
 	const size_t capture_cap = [&]() -> size_t {
 		if (const char* value = std::getenv("KYTY_PRECOMPILE_SHARD_CAP"); value != nullptr && *value != 0)
 			return std::strtoull(value, nullptr, 10);
