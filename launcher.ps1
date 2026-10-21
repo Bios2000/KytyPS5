@@ -48,7 +48,8 @@ $safeGpuTip = "Prevents the crashes and blue screens that come from the graphics
 
 $settings = [ordered]@{ game = ''; resolution = '2560x1440'; fullscreen = $false; aspect = $true; language = 1; redzone = $true; cheats = $false;
 	ecores = $false; fps120 = $false; render = 1440; ratio = '16:9'; quality = 'standard'; vsync = $false; hdr = $false; framegen = 0
-	hud = 0; streamline = ''; safegpu = $false; upscaler = ''; render_dlss = 1080; fsr = $false; output = '4k' }
+	hud = 0; streamline = ''; safegpu = $false; upscaler = ''; render_dlss = 1080; fsr = $false; output = '4k'
+	lowlatency = $false }
 if (Test-Path $settingsPath) {
 	$saved = Get-Content $settingsPath -Raw | ConvertFrom-Json
 	foreach ($property in $saved.PSObject.Properties) { if ($settings.Contains($property.Name)) { $settings[$property.Name] = $property.Value } }
@@ -308,6 +309,8 @@ function Get-PlayCommand {
 	if ($settings.fps120) { $arguments += '-Fps120' }
 	# Presents wait for the display's refresh (Vulkan FIFO): no tearing, and G-SYNC/FreeSync displays keep adapting.
 	if ($settings.vsync) { $arguments += @('-PresentMode', 'Fifo') }
+	# One frame queued instead of about two ($lowLatencyTip).
+	if ($settings.lowlatency) { $arguments += '-LowLatency' }
 	# HDR10 output when Windows HDR is on for the display; SDR otherwise.
 	if ($settings.hdr) { $arguments += '-Hdr' }
 	# The cheats file of this title, when it has one: the emulator applies the mods left enabled in it.
@@ -547,6 +550,12 @@ $fps120 = New-Object System.Windows.Forms.CheckBox -Property @{ Text = 'Up to 12
 Add-Row '' @($fps120)
 $vsync = New-Object System.Windows.Forms.CheckBox -Property @{ Text = 'VSync (no screen tearing; adaptive sync displays keep it)'; AutoSize = $true; Checked = [bool]$settings.vsync }
 Add-Row '' @($vsync)
+$lowLatencyTip = "The game keeps one finished frame waiting for the screen instead of about two, so what you press shows sooner:`n" +
+	"at 60 Hz about 15-23 ms from the game's frame to the screen instead of about 30. A frame that comes late is then no`n" +
+	"longer covered by a waiting one, so the frame pacing is a little less even."
+$lowLatency = New-Object System.Windows.Forms.CheckBox -Property @{ Text = 'Low latency (less input lag, slightly less even frame pacing)'; AutoSize = $true; Checked = [bool]$settings.lowlatency }
+(New-Object System.Windows.Forms.ToolTip -Property @{ AutoPopDelay = 30000 }).SetToolTip($lowLatency, $lowLatencyTip)
+Add-Row '' @($lowLatency)
 $hdr = New-Object System.Windows.Forms.CheckBox -Property @{ Text = 'HDR (turn on "Use HDR" in Windows display settings first)'; AutoSize = $true; Checked = [bool]$settings.hdr }
 Add-Row '' @($hdr)
 $safeGpu = New-Object System.Windows.Forms.CheckBox -Property @{ Text = 'Safe GPU mode: prevents GPU-hang crashes and blue screens, but the frame rate is about 37% lower'; AutoSize = $true; Checked = [bool]$settings.safegpu }
@@ -648,6 +657,7 @@ function Read-Form {
 	$settings.redzone    = $redzone.Checked
 	$settings.fps120     = $fps120.Checked
 	$settings.vsync      = $vsync.Checked
+	$settings.lowlatency = $lowLatency.Checked
 	$settings.hdr        = $hdr.Checked
 	$settings.cheats     = $cheats.Checked
 	$settings.safegpu    = $safeGpu.Checked

@@ -95,6 +95,9 @@ stay at 60.
 "VSync" (off by default) waits for the display's refresh, so the picture does not tear; displays with
 adaptive sync (G-SYNC, FreeSync) keep it. "HDR" (off by default) outputs HDR10 when "Use HDR" is on for the
 display in Windows' display settings (the game is told the TV takes HDR); otherwise the picture stays SDR.
+"Low latency" (off by default) keeps one finished frame waiting for the screen instead of about two, so what you
+press shows sooner: at 60 Hz about 15-23 ms from the game's frame to the screen instead of about 30. A frame that
+comes late is then no longer covered by a waiting one, so the frame pacing is a little less even.
 "Render height" (1440 by default, as on the PS5) is the height the game renders its 3D at before it
 upscales it to its 4K picture; lower heights (1296, 1152, 1080, 900) are faster where the graphics card
 limits the frame rate (a laptop RTX 3080 at Boletaria's start: 20.7 fps at 1440, 24.8 at 1080) and
@@ -199,6 +202,7 @@ shortcut):
 | `-TextureReduce 2` | Large textures without their largest levels: `1` half the size per side (the default with less than 12 GB of video memory), `2` a quarter, `0` whole |
 | `-Fps120` | The game's frame rate up to 120 fps instead of 60 (the launcher's "Up to 120 fps") |
 | `-PresentMode Fifo` | VSync on (the launcher's "VSync") |
+| `-LowLatency` | Less input lag: one frame waiting for the screen instead of about two (the launcher's "Low latency") |
 | `-Hdr` | HDR10 output when Windows' "Use HDR" is on for the display |
 | `-Upscaler dlss` | DLSS super resolution through the game's PS5 Pro path (NVIDIA RTX, needs Streamline: see "Upscaler" above) |
 | `-FrameGen 1` | DLSS frame generation, the number of generated frames per rendered one (`1` = 2x, up to `5`; RTX 40 or newer, needs Streamline) |
