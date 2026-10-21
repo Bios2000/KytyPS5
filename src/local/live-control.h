@@ -17,6 +17,7 @@
 //   glide <x> <y> <z> <speed>     Demon's Souls 01.007.000: the player walks there (warp requests, no input)
 //   pad <lx> <ly> <rx> <ry> <buttons> <seconds>   scripted pad input (sticks 0..255, -1 the host's; buttons hex)
 //   screenshot <path>             the next frame shown, read back from the GPU, as a PPM file (screenshot.h)
+//   set <name> <value>            a live switch (live-switch.h), e.g. fsr_jitter_mode 1
 //   sleep <seconds>
 // Without KYTY_LIVE_FILE nothing runs; the flip hook is one relaxed increment.
 
@@ -31,6 +32,7 @@
 #include "local-platform.h"
 #include "perf-overlay.h"
 #include "screenshot.h"
+#include "live-switch.h"
 #include "slow-log.h"
 #include "time-census.h"
 
@@ -653,6 +655,10 @@ inline void Run(uint64_t id, const std::string& line) {
 		// screenshot <path>: the next frame shown, as a PPM file (screenshot.h; "SCREENSHOT <path>" once written).
 		Libs::Graphics::Screenshot::Request(arg1);
 		std::printf("LIVE_SCREENSHOT id=%" PRIu64 " path=%s\n", id, arg1);
+	} else if (cmd == "set" && n >= 3) {
+		// set <name> <value>: a live switch (live-switch.h).
+		const bool ok = LiveSwitch::Set(arg1, std::strtoll(arg2, nullptr, 10));
+		std::printf("LIVE_SET id=%" PRIu64 " %s=%s ok=%d\n", id, arg1, arg2, ok ? 1 : 0);
 	} else if (cmd == "sleep" && n >= 2) {
 		std::this_thread::sleep_for(std::chrono::duration<double>(std::strtod(arg1, nullptr)));
 	} else if (cmd == "capture" && n >= 2) {
