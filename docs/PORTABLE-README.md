@@ -62,6 +62,22 @@ folder (usually named `PPSA01341-app0`).
   `run.cmd -Game "D:\Games\PPSA01341-app0.zar"`. Pack it with `zarchive.exe <folder> <file.zar>`
   (ZArchive, https://github.com/Exzap/ZArchive/releases). The folder stays the main way.
 
+### Add-on content (DLC)
+
+- Add-ons with files of their own: one folder each in `Content\PPSA01341\` inside the emulator folder,
+  holding the add-on's unpacked files (with its `sce_sys\param.json`). The game is told it owns them.
+- Add-ons without files (a deluxe edition's extras, say): one section each in `dlc_emu.ini` in the
+  emulator folder, with the add-on's content id:
+
+  ```ini
+  [PSAL]
+  content_id=EP9000-PPSA01341_00-XXXXXXXXXXXXXXXX
+  download_status=NO_EXTRA_DATA
+  service_label=0
+  ```
+
+- The run log lists each add-on the game is told it owns (`NpEntitlementAccess: ... reported as owned`).
+
 ## Starting the game
 
 **Double-click `launcher.cmd`** for a small settings window: the game folder, the resolution with the
@@ -297,6 +313,7 @@ The keyboard has no L2 / R2 by default: use a gamepad when you need them.
 | `launch.json` | The emulator's command line and extra switches; normally left alone |
 | `launcher-settings.json` | The launcher's settings |
 | `_DebugSnapshots` | The F9 debug snapshots (picture, position, log), to attach to an issue |
+| `Content\<title>`, `dlc_emu.ini` | Add-on content (DLC), if you add it (see "Add-on content") |
 
 ## Updating to a newer package
 
