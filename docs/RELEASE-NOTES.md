@@ -1,5 +1,22 @@
 ## New in this build
 
+A hotfix for v20261021's precompile. The shaders are the same as in v20261021: your precompiled store stays valid.
+
+- **A precompile that never finished (issue #107):** on PCs where the game had been played before, v20261021's
+  precompile split its shards without end, and its "waiting" count kept growing. It loaded the game's own pipeline
+  cache (`_PipelineCache\local`), whose data holds the compression dictionary NVIDIA's driver trained in play, and with
+  that no pipeline could be kept. The precompile no longer loads that cache, and its shards are smaller (about 100
+  pipelines each, at most 160). If you stopped a v20261021 precompile, run it again: what it finished is kept.
+- **1080p output in the launcher:** "Game output" picks 4K (as on the PS5) or 1080p, the game's own HD mode, also
+  `run.cmd -HdOutput`. In it the souls counter's backdrop is now right (a contribution by @intellq, PR #106), and FSR 3.1
+  frame generation keeps the HUD sharp.
+- **Cheats one by one:** the launcher's "Cheats" checkbox applies `_Patches\<title id>.json`, and "Select..." picks
+  which of its cheats are on (a contribution by @Myoko, PR #105).
+- **Linux:** source builds with clang can use profile-guided optimization, and the README explains how to make a
+  profile (+7.5% on an i5-14400 with an RX 9060 XT; contributions by @the2ndday, PRs #108 and #109).
+
+## New in v20261021
+
 The shaders are the same as in v20261020b: your precompiled store stays valid. Running the precompile again adds the
 new boss-death shaders below (only the new part is compiled).
 
@@ -43,23 +60,18 @@ new boss-death shaders below (only the new part is compiled).
 - **Thanks** to @intellq, @Myoko, @iSamigor, @Vorshim92, @Tutuzaooo and @Al3cko for their contributions, and to
   everyone who reported problems and tested.
 
-## New in v20261020b
-
-- **Crash on PCs with 16 GB of RAM (issue #91):** v20261020's new memory saving for textures (on by default with 20 GB
-  of RAM or less) could end the emulator with "PageManager fatal: read-watcher overflow" while a level loaded. Fixed;
-  the saving stays on. If you added `-Set KYTY_TEXTURE_OFFLOAD=0` to get around the crash, you can remove it again.
-- **Four shaders that ended the emulator:** four of the game's pixel shaders could not be translated, and the emulator
-  stopped where the game drew with one of them (an automated tour hit one in the Valley of Defilement). They translate
-  now, and the precompile builds them.
-- **More shaders precompiled:** automated tours through all six worlds, fighting and killing every enemy (bosses too),
-  added 153 shader programs and 580 pipelines to the hints. Among them are three large Shrine of Storms shaders that
-  froze the game for up to 40 s the first time they were needed.
-- **Linux with AMD graphics:** questions to the graphics driver whose answer is already known are skipped, and where a
-  question is slow, a separate thread follows the GPU instead (`KYTY_TIMELINE_WATCHER=0` turns it off; issue #80).
-
-Earlier changes are on the release pages of v20261020 and before.
+Earlier changes are on the release pages of v20261020b and before.
 
 ## 本版本的变化
+
+这是针对 v20261021 预编译问题的修复版本。着色器与 v20261021 相同：你已经预编译的存储继续有效。
+
+- **预编译一直无法结束（issue #107）：** 在之前已经玩过游戏的电脑上，v20261021 的预编译会不停地拆分分片，"waiting" 的数量越来越多。原因是它读取了游戏自己的管线缓存（`_PipelineCache\local`），其中包含 NVIDIA 驱动在游玩时训练出的压缩字典，结果一个管线都无法保存。现在预编译不再读取这个缓存，分片也更小了（每个约 100 个管线，最多 160 个）。如果你中断过 v20261021 的预编译，重新运行即可：已经完成的部分会保留。
+- **启动器中的 1080p 输出：** "Game output" 可以选择 4K（与 PS5 相同）或 1080p（游戏自带的高清模式），也可以用 `run.cmd -HdOutput`。这个模式下魂数旁边的深色条现在显示正常（@intellq 的贡献，PR #106），FSR 3.1 帧生成时 HUD 也保持清晰。
+- **逐个选择作弊项：** 启动器的 "Cheats" 复选框会应用 `_Patches\<title id>.json`，"Select..." 可以选择启用其中哪些作弊项（@Myoko 的贡献，PR #105）。
+- **Linux：** 用 clang 从源码构建时可以使用配置文件引导优化（PGO），README 说明了如何生成配置文件（i5-14400 + RX 9060 XT 上 +7.5%；@the2ndday 的贡献，PR #108 和 #109）。
+
+## v20261021 的变化
 
 着色器与 v20261020b 相同：你已经预编译的存储继续有效。再运行一次预编译会加入下面提到的 Boss 死亡着色器（只编译新增的部分）。
 
@@ -80,11 +92,4 @@ Earlier changes are on the release pages of v20261020 and before.
 - **内部清理：** 删掉了约 6,000 行已经结束的实验和诊断代码；发布用的设置现在就是模拟器自己的默认值（`launch.json` 不再列出它们；`-Set KEY=` 仍然可以关闭某一项）。行为和帧率不变（16 张地图全部测试过），着色器不变。
 - **感谢** @intellq、@Myoko、@iSamigor、@Vorshim92、@Tutuzaooo 和 @Al3cko 的贡献，也感谢所有报告问题和帮忙测试的玩家。
 
-## v20261020b 的变化
-
-- **16 GB 内存电脑上的崩溃（issue #91）：** v20261020 新增的纹理省内存功能（内存 20 GB 及以下默认开启）可能在加载关卡时让模拟器以 "PageManager fatal: read-watcher overflow" 退出。已修正，该功能保持开启。如果你为了绕过崩溃加了 `-Set KYTY_TEXTURE_OFFLOAD=0`，现在可以去掉了。
-- **会让模拟器退出的四个着色器：** 游戏里有四个像素着色器无法翻译，游戏用到它们的地方模拟器就会停止。现在它们可以正常翻译，预编译也会生成它们。
-- **预编译的着色器更多了：** 自动测试跑遍了全部六个世界，与每个敌人（包括 Boss）战斗并击杀，提示里多了 153 个着色器程序和 580 个管线，其中包括风暴神殿的三个大型着色器，它们第一次用到时会让游戏卡住最长约 40 秒。
-- **Linux 和 AMD 显卡：** 已知答案的驱动询问会被跳过；询问较慢时，改由一个单独的线程跟踪 GPU 进度（`KYTY_TIMELINE_WATCHER=0` 可关闭；issue #80）。
-
-更早的变化见 v20261020 及之前版本的发布页面。
+更早的变化见 v20261020b 及之前版本的发布页面。
