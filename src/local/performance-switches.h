@@ -154,7 +154,7 @@ inline void InitializePerformanceSwitches() {
 	std::string enabled;
 	for (const auto& setting: switches) {
 		const auto* text = std::getenv(setting.environment);
-		if (text == nullptr) {
+		if (text == nullptr || *text == '\0') { // (an empty value keeps the default, as run_ds.sh's ${NAME:-default} did)
 			continue;
 		}
 		char*      end   = nullptr;

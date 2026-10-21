@@ -39,8 +39,10 @@ const std::string& ExtraLines() {
 				at = end + 1;
 			}
 		};
+		const char* value = std::getenv("KYTY_GAME_CONVARS"); // (0: none, not even the defaults)
+		if (value != nullptr && std::string_view(value) == "0") return std::string();
 		if (Libs::Graphics::DemonsSouls::IsSupportedGame()) add("doIndexBufferCulling=false");
-		if (const char* value = std::getenv("KYTY_GAME_CONVARS")) add(value);
+		if (value != nullptr) add(value);
 		std::string out;
 		for (const auto& [name, entry]: entries) out += "+" + entry + "\n";
 		return out;

@@ -332,7 +332,11 @@ if ($StreamlineDir) { $environment['KYTY_STREAMLINE_DIR'] = $StreamlineDir }
 # starts a new pair only before KEY=, so values such as 1,2,3,6,7 stay whole).
 foreach ($pair in ($Set | ForEach-Object { $_ -split ',(?=[A-Za-z_][A-Za-z0-9_]*=)' })) {
 	$key, $value = $pair -split '=', 2
-	if ($value) { $environment[$key] = $value } else { $environment.Remove($key); Remove-Item "env:$key" -ErrorAction SilentlyContinue }
+	# (KEY= removes what the config or this script set; for the emulator's own defaults it turns the path off, 0, as it
+	# did when they were set here: -Set KYTY_TABLE_XPR=,KYTY_TABLE_DISPATCH= in issue replies.)
+	if ($value) { $environment[$key] = $value }
+	elseif ($environment.Contains($key)) { $environment.Remove($key); Remove-Item "env:$key" -ErrorAction SilentlyContinue }
+	else { $environment[$key] = '0' }
 }
 # Above 60 Hz (-Fps120, -Vblank; after -Set, whose engine settings get it too): Demon's Souls steps its game by at
 # least a frame of its target rate each frame (gameMinDeltaTime below 0, its default: 1/60 s, the cinematic mode's

@@ -45,7 +45,7 @@ CPUs ...". To leave everything to Windows instead: `run.cmd -Set KYTY_RECORDING_
 The game starts with the table path: most draws and compute dispatches read their resources straight
 from GPU memory instead of descriptor sets the emulator builds for each of them (Boletaria standing
 about 45 → 50–53 fps). The first visit to an area compiles its pipelines in the background, so the
-gain grows as you play. To start without it: `run.cmd -Set KYTY_TABLE_XPR=,KYTY_TABLE_DISPATCH=`.
+gain grows as you play. To start without it: `run.cmd -Set KYTY_TABLE_XPR=0,KYTY_TABLE_DISPATCH=0`.
 
 ## Where to put the game files
 
