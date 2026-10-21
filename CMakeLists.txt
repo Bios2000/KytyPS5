@@ -211,6 +211,18 @@ if(KYTY_CLANG_CL)
 		add_compile_options("-fprofile-instr-use=${KYTY_PGO_USE}" -Wno-profile-instr-unprofiled
 		                    -Wno-profile-instr-out-of-date -Wno-backend-plugin)
 	endif()
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+	# Linux: the same PGO switches. The profile must be made on Linux (tools/pgo is clang-cl's).
+	option(KYTY_PGO_GENERATE "Instrumented build; the live command `pgo <file>` writes the profile" OFF)
+	set(KYTY_PGO_USE "" CACHE FILEPATH "llvm-profdata output to optimize with (empty: none)")
+	if(KYTY_PGO_GENERATE)
+		add_compile_options(-fprofile-instr-generate)
+		add_link_options(-fprofile-instr-generate)
+		add_compile_definitions(KYTY_PGO_GENERATE=1)
+	elseif(KYTY_PGO_USE)
+		add_compile_options("-fprofile-instr-use=${KYTY_PGO_USE}" -Wno-profile-instr-unprofiled
+		                    -Wno-profile-instr-out-of-date -Wno-backend-plugin)
+	endif()
 endif()
 
 add_subdirectory("${KYTY_THIRD_PARTY_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/3rdparty")
