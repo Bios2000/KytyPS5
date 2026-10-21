@@ -704,8 +704,8 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
 	}
 #endif
 	(void)fsr_queues;
-	if (const char* readback = std::getenv("KYTY_READBACK_QUEUE");
-	    readback != nullptr && readback[0] != '\0' && std::strcmp(readback, "0") != 0) {
+	// (KYTY_READBACK_QUEUE=0: no transfer queue, as the switch's mode; performance-switches.h.)
+	if (const char* readback = std::getenv("KYTY_READBACK_QUEUE"); readback == nullptr || std::strcmp(readback, "0") != 0) {
 		uint32_t family_count = 0;
 		physical_device.getQueueFamilyProperties(&family_count, nullptr);
 		std::vector<vk::QueueFamilyProperties> families(family_count);

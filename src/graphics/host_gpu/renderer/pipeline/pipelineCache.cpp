@@ -68,7 +68,7 @@
 
 extern "C" {
 // 1: find graphics pipelines through a block-hashed index of the full key.
-volatile std::atomic<uint32_t> kyty_local_pipeline_index_mode {0};
+volatile std::atomic<uint32_t> kyty_local_pipeline_index_mode {1};
 // (performance-switches.h, KYTY_SPECULATE) Speculative translation records ahead on other threads.
 extern volatile std::atomic_uint32_t kyty_local_speculate_mode;
 }
@@ -1809,16 +1809,16 @@ struct PipelineCache::ProgramCache {
 		vk::ShaderModule                         module = nullptr; // the result's, made by the worker
 	};
 
-	// In front of the game KYTY_SHADER_WARMUP_THREADS (default 1); beside it KYTY_SHADER_WARMUP_BACKGROUND_THREADS
+	// In front of the game KYTY_SHADER_WARMUP_THREADS (default 16); beside it KYTY_SHADER_WARMUP_BACKGROUND_THREADS
 	// (default SpareThreads).
 	static uint32_t WarmupThreads(bool background) {
-		uint32_t threads = background ? SpareThreads() : 1;
+		const uint32_t fallback = background ? SpareThreads() : 16;
+		uint32_t       threads  = fallback;
 		const char* name = background ? "KYTY_SHADER_WARMUP_BACKGROUND_THREADS" : "KYTY_SHADER_WARMUP_THREADS";
 		if (const char* value = std::getenv(name); value && *value) {
 			const auto end    = value + std::strlen(value);
 			const auto parsed = std::from_chars(value, end, threads);
-			if (parsed.ec != std::errc {} || parsed.ptr != end || threads == 0 || threads > 64)
-				threads = background ? SpareThreads() : 1;
+			if (parsed.ec != std::errc {} || parsed.ptr != end || threads == 0 || threads > 64) threads = fallback;
 		}
 		return threads;
 	}
@@ -1957,8 +1957,10 @@ struct PipelineCache::ProgramCache {
 
 	void TranslateWarmup(Common::Mutex& mutex, bool background, const std::atomic<bool>& stop) {
 		const auto begin = std::chrono::steady_clock::now();
-		// 0 means all recorded inputs. A caller can explicitly bound startup time.
-		uint32_t budget_seconds = 0;
+		// At most a minute of start-up warmup (KYTY_SHADER_WARMUP_SECONDS; 0: all recorded inputs, as a precompile run,
+		// KYTY_SHADER_WARMUP_ONLY, takes them): with an empty driver cache (the first launch, a driver update) its ~4400
+		// pipelines took 4.5 minutes; the rest are built at their first use and cached from then on.
+		uint32_t budget_seconds = std::getenv("KYTY_SHADER_WARMUP_ONLY") != nullptr ? 0 : 60;
 		if (const char* value = std::getenv("KYTY_SHADER_WARMUP_SECONDS"); value && *value) {
 			const auto end = value + std::strlen(value);
 			const auto parsed = std::from_chars(value, end, budget_seconds);
@@ -2580,9 +2582,11 @@ PipelineCache::PipelineCache(GraphicContext& graphics)
 	                                                  ? "made unoptimized first, the optimized build replaces them "
 	                                                    "(KYTY_PIPELINE_FAST_BUILD=0: optimized at once)"
 	                                                  : "made optimized (KYTY_PIPELINE_FAST_BUILD=1: unoptimized first)");
+	// KYTY_SHADER_WARMUP: 1 (default), record, or 0 (none).
 	const char* warmup             = std::getenv("KYTY_SHADER_WARMUP");
 	bool        prefetch_by_warmup = false; // (RunWarmup starts the shader prefetch)
-	if (warmup && IsBinaryDriverCacheKey(m_driver_cache_key) && m_driver_cache != nullptr &&
+	if (warmup == nullptr) warmup = "1";
+	if (IsBinaryDriverCacheKey(m_driver_cache_key) && m_driver_cache != nullptr &&
 	    (std::string_view(warmup) == "1" || std::string_view(warmup) == "record")) {
 		const auto device = ShaderInputDeviceSignature(m_graphics.GetPhysicalDeviceProperties());
 		const auto title = PipelineCacheTitleId();
@@ -3325,12 +3329,18 @@ void PipelineCache::InitializeDriverCache() {
 	}
 	const std::string_view git_hash     = KYTY_GIT_HASH;
 	const std::string_view git_revision = KYTY_GIT_REVISION;
-	if (const auto* key = std::getenv("KYTY_DRIVER_CACHE_KEY"); key && *key) {
-		if (!IsBinaryDriverCacheKey(key)) {
+	// The key of the driver pipeline cache (_PipelineCache/local/<key>), one for every build: the driver finds a
+	// pipeline by its whole input (SPIR-V and state), so a new build reuses the pipelines of the shaders it left
+	// alone. Keyed by the executable, every update compiled the ~3700 warmup pipelines again (2-2.5 minutes); it also
+	// enables the shader warmup, which a modified source tree runs without otherwise. KYTY_DRIVER_CACHE_KEY: another.
+	const char* cache_key = std::getenv("KYTY_DRIVER_CACHE_KEY");
+	if (cache_key == nullptr) cache_key = "1f3c29b70e536c8f5a5e812e793b33ac2eb6858b4810ed98ca2a51b9fa5eed97";
+	if (*cache_key != '\0') {
+		if (!IsBinaryDriverCacheKey(cache_key)) {
 			PipelineCacheLog("Vulkan pipeline cache: disabled (invalid executable fingerprint)");
 			return;
 		}
-		m_driver_cache_key = key;
+		m_driver_cache_key = cache_key;
 	}
 	if (git_hash == "unknown" || git_revision == "unknown") {
 		PipelineCacheLog("Vulkan pipeline cache: disabled (unknown git revision)");

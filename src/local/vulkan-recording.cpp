@@ -23,9 +23,9 @@
 extern "C" {
 // 1: record Vulkan commands for the worker thread, draws and descriptor
 // encoding as whole packets (KYTY_VULKAN_RECORDING).
-volatile std::atomic<uint32_t> kyty_local_vulkan_recording_mode {0};
+volatile std::atomic<uint32_t> kyty_local_vulkan_recording_mode {1};
 // 1: queue command-buffer begin/end/submit instead of draining (DeferredSubmitEnabled).
-volatile std::atomic<uint32_t> kyty_local_deferred_submit_mode {0};
+volatile std::atomic<uint32_t> kyty_local_deferred_submit_mode {1};
 // Pauses the idle worker spins before it blocks (a blocked worker costs the render thread a
 // wake-up system call per publish on Windows).
 #if defined(_WIN32)

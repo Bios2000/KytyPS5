@@ -21,7 +21,7 @@
 extern "C" {
 // 1: drop a repeated-write barrier that repeats an identical transition of the
 // same image inside one transit group.
-volatile std::atomic<uint32_t> kyty_local_image_barrier_dedupe {0};
+volatile std::atomic<uint32_t> kyty_local_image_barrier_dedupe {1};
 }
 
 namespace Libs::Graphics {

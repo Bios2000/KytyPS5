@@ -43,13 +43,13 @@
 #include <xxhash.h>
 #include "speculation-state.h"
 
-[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_write_window_handoff_mode {0};
-[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_image_granules_mode {0};
-[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_texture_resolve_pages_mode {0};
-[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_partial_image_dirty_mode {0};
+[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_write_window_handoff_mode {1};
+[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_image_granules_mode {2};
+[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_texture_resolve_pages_mode {1};
+[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_partial_image_dirty_mode {1};
 // 1: a partial refresh uploads only the rows of tile blocks over the dirty ranges of a large
 // subresource, not the whole subresource (UploadImagePartial).
-[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_partial_row_bands_mode {0};
+[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_partial_row_bands_mode {1};
 // 0: a sampled view refreshes the whole texture, not only its levels (RefreshTextureLevels; on by default, 0 for an A/B).
 [[gnu::used]] volatile std::atomic<uint32_t> kyty_local_texture_levels_mode {1};
 // 0: an image GPU buffer writes covered parts of is uploaded whole, not only the subresources over them (InitializeImage;

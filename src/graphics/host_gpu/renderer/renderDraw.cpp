@@ -71,10 +71,10 @@ namespace Libs::Graphics {
 extern "C" {
 // 0: a draw run reads no buffer range that any image overlaps; 1: sampled
 // images whose contents still come from the CPU may overlap its read ranges.
-volatile std::atomic_uint32_t kyty_local_draw_run_ranges_mode {0};
+volatile std::atomic_uint32_t kyty_local_draw_run_ranges_mode {1};
 // KYTY_DRAW_PACKETS: the ordinary DrawIndex/DrawAuto draws are recorded as packets too (their
 // debug phases are CPU-side notes only), instead of ~20 separately recorded Vulkan calls each.
-volatile std::atomic_uint32_t kyty_local_draw_packets_mode {0};
+volatile std::atomic_uint32_t kyty_local_draw_packets_mode {1};
 }
 
 // Draw state in reusable preparation storage when that switch is on.

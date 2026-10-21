@@ -20,7 +20,7 @@
 
 extern "C" {
 // Dispatches recorded per submission (KYTY_DISPATCH_BATCH).
-volatile std::atomic_uint32_t kyty_local_dispatch_batch {32};
+volatile std::atomic_uint32_t kyty_local_dispatch_batch {128};
 // Draws recorded per submission (KYTY_DRAW_BATCH, 0: no limit): about 0.5 ms of translated draws.
 volatile std::atomic_uint32_t kyty_local_draw_batch {256};
 // Buffer uploads of pages dirty since before the open command buffer began go into its upload prologue
@@ -29,7 +29,7 @@ volatile std::atomic_uint32_t kyty_local_draw_batch {256};
 // 0: refresh the master timeline before every drain attempt.
 // 1: prove the pending-operation queue empty before the timeline query and the
 //    operation lock. Draws and dispatches call this with nothing to retire.
-volatile std::atomic<uint32_t> kyty_local_pending_drain_mode {0};
+volatile std::atomic<uint32_t> kyty_local_pending_drain_mode {1};
 // Flush points nothing waits on (a label without an interrupt, the end of a queue's slice) leave the open buffer open
 // while the GPU still runs work it was handed (CommandScheduler::DeferrableFlush; KYTY_FLUSH_DEFER=0: flush at once).
 [[gnu::used]] volatile std::atomic<uint32_t> kyty_local_flush_defer {2};

@@ -25,7 +25,7 @@ extern "C" {
 // dedicated allocation is a kernel call (~0.1 ms on Windows) the render thread paid for every
 // such buffer the cache retired while the game streams. VMA synchronizes internally, and a buffer
 // is destroyed only after the GPU is done with it.
-[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_buffer_reclaim_mode {0};
+[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_buffer_reclaim_mode {1};
 }
 
 namespace Libs::Graphics {

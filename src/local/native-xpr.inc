@@ -36,37 +36,37 @@
 
 extern "C" {
 // 0 off, 1 native XPR draws, 2 verification.
-[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_native_xpr_mode {0};
+[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_native_xpr_mode {1};
 // Negative controls for the offline replay only: bit 0 zeroes the vertex
 // stage's flattened SRT in the upload, bit 1 skips the draw call.
 [[gnu::used]] volatile std::atomic<uint32_t> kyty_local_native_xpr_debug {0};
 // 1: objects are drawn in last frame's order, so the record that followed this
 // one last frame is prefetched while this draw runs.
-[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_native_xpr_predict_mode {0};
+[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_native_xpr_predict_mode {1};
 // 1: native image proofs check the image's own registration (see NativeXprValidateResources).
-[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_native_image_proof_mode {0};
+[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_native_image_proof_mode {1};
 // 1: a store whose pipeline variant is not compiled yet hands it to the compile workers and
 // is skipped; the draw takes the normal path until a later store finds the variant ready.
-[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_async_xpr_pipelines_mode {0};
+[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_async_xpr_pipelines_mode {1};
 // 1: relocation. Objects whose user data points at a new copy of the same tables every frame (a ring)
 // had keys new every frame, so no record; the pointer words (user data pairs the SRT reads through and
 // uses for nothing else) leave the key, and the record reads the same offsets from the new base.
-[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_native_xpr_relocate_mode {0};
+[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_native_xpr_relocate_mode {1};
 // N > 0: at most N store requests a frame. Walking brings hundreds of meshes and LODs
 // into view at once; storing them all in one frame (about 16 us each) made it a hitch. The others ask again
 // in later frames (their draws take the normal path until then).
-[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_native_xpr_store_budget {0};
+[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_native_xpr_store_budget {256};
 // N > 2: records stay N frames unused (2 before: a turn of the camera dropped every record behind it, and
 // turning back stored them all again within the store budget, thousands of normal draws a frame for seconds).
-[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_native_xpr_keep_frames {0};
+[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_native_xpr_keep_frames {600};
 // 1: a relocated key holds the object's descriptor bases (read through the draw's pointers) before its use in
 // the frame: the instances of one mesh keep their records when the frame draws them in another order (a culled
 // instance shifted every later use onto another instance's record, which rebound its descriptors).
-[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_native_xpr_instance_mode {0};
+[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_native_xpr_instance_mode {1};
 // 1: table draws (src/local/table-xpr.inc) for the pairs that allow them.
-[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_table_xpr_mode {0};
+[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_table_xpr_mode {2};
 // 1: table dispatches (src/local/table-xpr.inc) for the compute shaders that allow them.
-[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_table_dispatch_mode {0};
+[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_table_dispatch_mode {1};
 [[gnu::used]] volatile std::atomic<uint32_t> kyty_local_table_indirect_mode {1};
 // N > 0: at most N table store requests a frame (each takes its draw to the normal path; the others draw from native
 // records meanwhile); 0: no limit. A new area brings hundreds of pairs whose programs and pipelines compile in the

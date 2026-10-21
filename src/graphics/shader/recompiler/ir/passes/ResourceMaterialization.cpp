@@ -22,7 +22,7 @@
 #include <unordered_set>
 
 extern "C" {
-volatile std::atomic<uint32_t> kyty_local_specialization_guard_mode {0};
+volatile std::atomic<uint32_t> kyty_local_specialization_guard_mode {1};
 }
 
 namespace Libs::Graphics::ShaderRecompiler::IR {

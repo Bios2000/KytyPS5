@@ -70,7 +70,7 @@ namespace Libs::LibKernel::Memory {
 extern "C" {
 // 1: small host-copy reads of guest backing take a lock-free read transaction
 // with a cached translation instead of the backing mutex.
-[[gnu::used]] volatile std::atomic_uint32_t kyty_local_backing_read_mode {0};
+[[gnu::used]] volatile std::atomic_uint32_t kyty_local_backing_read_mode {1};
 // 1: the other parts of a view a partial unmap maps again (Windows) get the GPU trackers' protection of their watched
 // pages at once, before the address-space lock is released (GuestBackingStore::ProtectRemapped). 0: given back after
 // the lock (ReapplyRemappedViews): a CPU write to a watched page in between went unseen (a GPU copy left stale, or a

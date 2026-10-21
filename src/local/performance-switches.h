@@ -1,7 +1,7 @@
 #pragma once
-// Runtime switches of the performance paths. Every path keeps the original
-// behaviour unless its environment variable is set; the GPU thread applies them
-// once, before it consumes commands. Values outside a switch's range abort.
+// Runtime switches of the performance paths. Their defaults are the release settings (the values the variables
+// define them with); an environment variable sets one for an A/B or a workaround (0 turns a path off). The GPU
+// thread applies them once, before it consumes commands. Values outside a switch's range abort.
 
 #include "native-buffer-residency.h"
 #include "local-platform.h"

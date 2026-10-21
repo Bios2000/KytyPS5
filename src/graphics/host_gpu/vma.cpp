@@ -352,7 +352,7 @@ uint64_t GraphicContext::GetTotalMemoryBudget() const {
 // and its memory for identical creation parameters is equivalent to a fresh
 // allocation.
 extern "C" {
-volatile std::atomic<uint32_t> kyty_local_image_pool_mode {0};
+volatile std::atomic<uint32_t> kyty_local_image_pool_mode {1};
 }
 namespace {
 struct PooledImage {

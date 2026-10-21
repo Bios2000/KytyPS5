@@ -17,27 +17,27 @@
 #include "gpu_tiler_shaders/lod_stats_pack_spv.h"
 
 extern "C" {
-volatile std::atomic<uint32_t> kyty_local_buffer_residency_mode {0};
-volatile std::atomic<uint32_t> kyty_local_copy_feedback_mode {0};
-[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_readback_detach_mode {0};
-[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_async_write_readback_mode {0};
-[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_readback_slots_mode {0};
-[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_async_upload_mode {0};
+volatile std::atomic<uint32_t> kyty_local_buffer_residency_mode {1};
+volatile std::atomic<uint32_t> kyty_local_copy_feedback_mode {1};
+[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_readback_detach_mode {1};
+[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_async_write_readback_mode {1};
+[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_readback_slots_mode {1};
+[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_async_upload_mode {2};
 // 1: RangeSet fast paths (rangeSet.h) for the GPU-modified range set.
-[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_range_set_fast_mode {0};
-[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_async_reprotect_mode {0};
+[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_range_set_fast_mode {1};
+[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_async_reprotect_mode {1};
 // Live switch (same-process A/B): ObtainBuffer's memo of repeated shader writes.
 [[gnu::used]] volatile std::atomic<uint32_t> kyty_local_write_memo_mode {1};
 // 1: a guest readback whose window meets an image falls back to the request's own pages.
-[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_readback_narrow_mode {0};
+[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_readback_narrow_mode {1};
 // KYTY_READBACK_QUEUE (readback-queue.h): 1: readbacks whose bytes no in-flight GPU work writes
 // copy on the transfer queue; 2: also those whose last writer is submitted but still running;
 // 3: as 1, and each such copy is repeated on the graphics queue and compared (verification).
-[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_readback_queue_mode {0};
+[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_readback_queue_mode {1};
 // 1: pack the LOD report on the GPU instead of a CPU wait and copy.
-volatile std::atomic<uint32_t> kyty_local_async_lod_stats_mode {0};
+volatile std::atomic<uint32_t> kyty_local_async_lod_stats_mode {1};
 // 1: shader constants stream through a host-visible upload ring.
-[[gnu::used]] volatile std::atomic_uint32_t kyty_local_stream_upload_mode {0};
+[[gnu::used]] volatile std::atomic_uint32_t kyty_local_stream_upload_mode {1};
 extern volatile std::atomic_uint32_t kyty_local_frame_pipeline_mode;
 }
 

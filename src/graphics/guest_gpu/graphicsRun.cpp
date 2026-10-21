@@ -59,9 +59,9 @@ extern "C" {
 // 0: synchronous frame boundary. 1: the guest may prepare the following frame
 // while the renderer consumes the previous one; guest reads of GPU-written
 // memory are then served by asynchronous readbacks (BufferCache).
-[[gnu::used]] volatile std::atomic_uint32_t kyty_local_frame_pipeline_mode {0};
+[[gnu::used]] volatile std::atomic_uint32_t kyty_local_frame_pipeline_mode {1};
 // 1: a full barrier with no recorded work since the previous one is skipped.
-[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_global_barrier_dedupe {0};
+[[gnu::used]] volatile std::atomic<uint32_t> kyty_local_global_barrier_dedupe {1};
 }
 
 static thread_local CommandProcessor* g_current_processor = nullptr;
