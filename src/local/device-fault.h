@@ -346,8 +346,8 @@ inline void AppendCheckpoints(std::string& text) {
 	}
 }
 
-// A diagnostic's report of its own state for the work past `reached` (KYTY_TABLE_WATCH: what the stalled dispatches'
-// blocks held when they were recorded and hold now), called once per stall.
+// A diagnostic's report of its own state for the work past `reached` (KYTY_DISPATCH_TIMING: which of the timed
+// dispatches the GPU is in, and what that one read), called once per stall.
 inline std::atomic<void (*)(uint64_t reached)> g_stall_dump {nullptr};
 
 // The last dispatches recorded (the render thread's; a stall reads them unlocked, a torn entry is possible): their

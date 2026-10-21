@@ -65,11 +65,6 @@ public:
 		return buffer != nullptr && !buffer->is_deleted ? buffer : nullptr;
 	}
 	[[nodiscard]] BufferId FindBuffer(uint64_t vaddr, uint64_t size);
-	// FindBuffer's registered buffer over the range, none registered: the null id.
-	[[nodiscard]] BufferId RegisteredBuffer(uint64_t vaddr, uint64_t size) {
-		const auto* owner = m_page_table.Find(vaddr >> PageTable::kPageBits);
-		return owner != nullptr && *owner && m_slot_buffers[*owner].IsInBounds(vaddr, size) ? *owner : BufferId {};
-	}
 	void                   EnsureBufferContents(uint64_t vaddr, uint64_t size);
 	// The start of each range shaders read through pointers held by a buffer with the guest's bytes (see the definition).
 	void                   EnsureBdaReadable(std::span<const GuestRange> ranges);
