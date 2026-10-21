@@ -146,7 +146,9 @@ uint32_t AutoHeight(bool upscaler) {
 	Libs::Graphics::WindowOutputSize(&width, &height);
 	if (height == 0) return 0;
 	if (upscaler) height = std::max(SuperResolutionLeastHeight, static_cast<uint32_t>(std::lround(height / 1.5)));
-	return std::clamp(height, 720u, OutputHeight);
+	// Without an upscaler at most the game's own 1440: a 4K window would render 2.25 times the default's pixels, a GPU
+	// cost nobody chose. 2160 stays a choice (KYTY_RENDER_HEIGHT=2160).
+	return std::clamp(height, 720u, upscaler ? OutputHeight : RenderHeight);
 }
 
 void Install(Program* program) {

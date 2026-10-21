@@ -29,8 +29,8 @@ struct Program;
 // The game finishes its frame at that size (bloom, depth of field, the HUD); it lays its interface out at 3840x2160
 // against the left edge, which src/local/hud-anchor.h places (the HUD at its sides, the rest widened as before).
 // KYTY_RENDER_HEIGHT unset or "auto" (the default): the height follows the window (Libs::Graphics::WindowOutputSize, the
-// display's in full screen) so that the 3D is rendered at the window's own pixels: its height (720-2160; a 3840x2160
-// window gets the game's whole 4K picture pixel-exact). Up to 1080 lines KYTY_HD_OUTPUT=auto adds the game's HD output
+// display's in full screen) so that the 3D is rendered at the window's own pixels: its height, 720 to the game's own
+// 1440 (a larger window keeps 1440; 2160, the game's whole 4K picture, is a choice). Up to 1080 lines KYTY_HD_OUTPUT=auto adds the game's HD output
 // (output, post-processing and HUD at 1920x1080, so a 1080p window is pixel-exact too; off by default, see
 // demonsSoulsHdOutput.cpp). With an upscaler (KYTY_UPSCALER) the window's height / 1.5, at least 1080 (its quality
 // mode; the output is the PS5 Pro path's 4K, scaled to the window). A number overrides it.

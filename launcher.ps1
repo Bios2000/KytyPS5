@@ -321,7 +321,7 @@ function Get-PlayCommand {
 	$dlss = $frameGenAvailable -and $settings.upscaler -eq 'dlss'
 	# The upscaler's own render height (with DLSS always passed: the PS5 Pro path's own height is 1512).
 	$height = if ($dlss) { [int]$settings.render_dlss } else { [int]$settings.render }
-	if ($height -gt 0 -and ($height -ne 1440 -or $dlss)) { $arguments += @('-RenderHeight', $height) }
+	if ($height -gt 0) { $arguments += @('-RenderHeight', $height) }
 	if ($settings.ratio -in '21:9', '32:9') { $arguments += @('-Aspect', $settings.ratio) }
 	if ($settings.quality -in 'low', 'lowest') {
 		$arguments += @('-Quality', $settings.quality, '-TextureReduce', $(if ($settings.quality -eq 'lowest') { 2 } else { 1 }))

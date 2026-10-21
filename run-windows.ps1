@@ -258,8 +258,9 @@ if (!$environment.Contains('KYTY_RENDER_CPUS')) { $environment['KYTY_RENDER_CPUS
 # -RenderHeight: the height Demon's Souls' performance mode renders its 3D at (src/loader/demonsSoulsRenderSize.h);
 # the game upscales it to its 3840x2160 output as it does 1440 (a laptop's RTX 3080 at Boletaria 1-1: standing
 # 20.7 -> 24.5 fps at 1080, walking 18.7 -> 22.2).
-# With -Upscaler the height is that of the PS5 Pro's display mode (2688x1512 unless given), so 1440 is passed too.
-if ($RenderHeight -gt 0 -and ($RenderHeight -ne 1440 -or $Upscaler)) { $environment['KYTY_RENDER_HEIGHT'] = "$RenderHeight" }
+# Without it the height follows the window: its own height, 720 to the game's 1440 (with -Upscaler the window's / 1.5,
+# at least 1080). A height given is passed as given, 1440 too, so the window's size does not change a choice.
+if ($RenderHeight -gt 0) { $environment['KYTY_RENDER_HEIGHT'] = "$RenderHeight" }
 # -HdOutput: the game's 1080p output (src/loader/demonsSoulsHdOutput.h). A 1440 render height (the default) becomes 1080.
 if ($HdOutput) { $environment['KYTY_HD_OUTPUT'] = '1' }
 # -Aspect 21:9 (or 32:9, w:h): the 3D rendered at that aspect, its width at the render height (3416x1440), the game's
