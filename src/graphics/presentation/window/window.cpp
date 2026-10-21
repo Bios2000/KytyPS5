@@ -46,6 +46,7 @@
 #include "loader/systemContent.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdlib>
 #include <fmt/format.h>
 #include <memory>
@@ -196,6 +197,7 @@ constexpr uint32_t KYTY_SDL_BUTTON_X2MASK = SDL_BUTTON_X2MASK; // NOLINT(hicpp-s
 namespace {
 
 std::unique_ptr<WindowContext> g_window;
+std::atomic<uint32_t>          g_output_width {0}, g_output_height {0}; // WindowOutputSize
 
 } // namespace
 
@@ -952,9 +954,27 @@ Presenter& WindowInit(uint32_t width, uint32_t height) {
 	StartupProgressShow(window->window);
 	window->CreateVulkan();
 	StartupProgressHide();
+	// The size the game is shown at: the display's in full screen (the window may not have it yet), else the window's
+	// drawable size (its swapchain's). Demon's Souls' render size follows it (loader/demonsSoulsRenderSize.h).
+	int output_width = 0, output_height = 0;
+	if (Config::FullscreenEnabled()) {
+		SDL_DisplayMode mode {};
+		if (SDL_GetDesktopDisplayMode(std::max(SDL_GetWindowDisplayIndex(window->window), 0), &mode) == 0) {
+			output_width  = mode.w;
+			output_height = mode.h;
+		}
+	}
+	if (output_width <= 0 || output_height <= 0) SDL_Vulkan_GetDrawableSize(window->window, &output_width, &output_height);
+	g_output_width.store(static_cast<uint32_t>(std::max(output_width, 0)), std::memory_order_relaxed);
+	g_output_height.store(static_cast<uint32_t>(std::max(output_height, 0)), std::memory_order_relaxed);
 	auto& presenter = *window->presenter;
 	g_window        = std::move(window);
 	return presenter;
+}
+
+void WindowOutputSize(uint32_t* width, uint32_t* height) {
+	*width  = g_output_width.load(std::memory_order_relaxed);
+	*height = g_output_height.load(std::memory_order_relaxed);
 }
 
 void WindowRun() {
