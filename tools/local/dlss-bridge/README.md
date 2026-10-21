@@ -22,7 +22,8 @@ the first time. Other folders can get the libraries too: `build-dlss-linux.sh _B
 
 The Linux package carries none of NVIDIA's files: it has the bridge's source (`dlss-bridge/`) and
 `get-dlss-linux.sh`, which downloads the SDK and builds the bridge on the user's PC with git and a C++ compiler alone
-(no CMake; installed with the distribution's package manager when missing), next to the package's `kyty_emulator`.
+(no CMake; when missing, it offers to install them with the distribution's package manager), next to the package's
+`kyty_emulator`.
 
 ## Run
 

@@ -116,7 +116,7 @@ jobs:
 
           ## DLSS (optional, NVIDIA RTX)
 
-          `./get-dlss-linux.sh` (once; it installs git and a C++ compiler when missing) downloads NVIDIA's DLSS
+          `./get-dlss-linux.sh` (once; it offers to install git and a C++ compiler when missing) downloads NVIDIA's DLSS
           SDK and builds `libkyty_dlss.so` from `dlss-bridge/`, next to the emulator with NVIDIA's DLSS libraries:
           then `KYTY_UPSCALER=dlss` and `KYTY_FRAMEGEN` work (the repository's `tools/local/dlss-bridge/README.md`).
 

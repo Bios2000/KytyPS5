@@ -22,8 +22,11 @@
 #
 # The NVIDIA driver compiles big compute shaders nearly one at a time per process, so the work is split into shards, a
 # niced process each (kyty_shader_precompile --shard i/n) with an NVIDIA disk cache of its own, merged into the static
-# cache at the end; a shard that reached NVIDIA's own dictionary compression (exit code 3) runs again as two. An
-# interrupted run resumes: finished shards are merged first, and what the static cache holds is not compiled again.
+# cache at the end, about 100 pipelines each (as the plan counts them). A shard stops at 160 (KYTY_PRECOMPILE_SHARD_CAP)
+# or where NVIDIA's own dictionary compression came anyway, leaves the rest (exit code 3) and runs again as two; a
+# dictionary from a shard's first pipeline on was the driver's before, which no smaller shard escapes: the run ends
+# (issue #107). An interrupted run resumes: finished shards are merged first, and what the static cache holds is not
+# compiled again.
 # Build the program with ./build-linux.sh kyty_shader_precompile; a release package has it next to this script. The
 # seed file (seeds-<title>_<version>.seeds) is made when there is none, and made again when the program changed.
 cd "$(dirname "$(readlink -f "$0")")" || exit 1
@@ -38,7 +41,7 @@ SHARDS=512
 CPU_LIST=''
 MODE=full-default # full-default | full | quick | coverage | inputs | hints
 EXE=''
-usage() { sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--game) GAME="$2"; shift 2 ;;
@@ -175,6 +178,12 @@ if [ "$RECORDED" = '*' ]; then
 	fi
 fi
 
+# The pipelines a seed file's dry run planned as its own (its plan line), 0 without one.
+planned_pipelines() {
+	local line
+	line=$(grep -F "of them this seed file's" "$ROOT/$LOGS/$1.out.log" 2>/dev/null | tail -1)
+	if [[ "$line" =~ \(([0-9]+)\ pipelines,\ ([0-9]+)\ of\ them ]]; then echo "${BASH_REMATCH[2]}"; else echo 0; fi
+}
 # The pipeline recipes of a seed file (its body after the identity line and checksum: the records, each its word count
 # and words, then the recipes' count). Without Python: 16000, a recording of every world.
 seed_pipelines() {
@@ -284,14 +293,19 @@ fi
 FIRST=()
 SECOND=()
 TAB=$'\t'
+# About 100 pipelines a shard, as the plan counts them. (The recorded seed file's graphics recipes alone counted half of
+# its pipelines: 1.07's hints made shards of about 240, past where NVIDIA's driver compresses with its dictionary.)
 if [ "$HAS_RECORDED" = 1 ]; then
-	# About as many pipelines a shard as the seeds' (100).
-	count=$(( ($(seed_pipelines "$RECORDED") + 99) / 100 ))
+	planned=$(planned_pipelines plan-recorded)
+	[ "$planned" -gt 0 ] || planned=$(( 2 * $(seed_pipelines "$RECORDED") ))
+	count=$(( (planned + 99) / 100 ))
 	[ "$count" -ge 1 ] || count=1
 	for ((i = 0; i < count; i++)); do FIRST+=("$RECORDED$TAB$i/$count"); done
 fi
 if [ "$MODE" != quick ]; then
-	for ((i = 0; i < SHARDS; i++)); do SECOND+=("$SEEDS$TAB$i/$SHARDS"); done
+	count=$(( ($(planned_pipelines plan-seeds) + 99) / 100 ))
+	[ "$count" -ge "$SHARDS" ] || count=$SHARDS
+	for ((i = 0; i < count; i++)); do SECOND+=("$SEEDS$TAB$i/$count"); done
 fi
 # The shards share the pipelines they hold (PipelineBinaryWriter::Claimed): one that several shards make is compiled once.
 export KYTY_PRECOMPILE_CLAIMS="$CACHES/claims"
@@ -345,6 +359,11 @@ while [ ${#FIRST[@]} -gt 0 ] || [ ${#SECOND[@]} -gt 0 ] || [ ${#RUN_PID[@]} -gt 
 		unset "RUN_PID[$name]" "RUN_SEEDS[$name]" "RUN_SHARD[$name]"
 		rm -rf "${CACHES:?}/$name"
 		if [ "$rc" = 3 ]; then
+			# NVIDIA's dictionary from the shard's first pipeline on: the driver had it before the shard compiled anything,
+			# and every smaller shard would too (issue #107).
+			if grep -q -F 'dictionary from here on (after 0 captured' "$ROOT/$LOGS/$name.out.log" 2>/dev/null; then
+				die "$name: NVIDIA's driver compressed even its first pipeline with a dictionary it had before, so the precompile cannot keep its pipelines and smaller shards would not help. Please report it in issue #107 (github.com/chenxiao07/KytyPS5) with the logs in $LOGS; what the precompile finished is kept."
+			fi
 			i="${shard%/*}"
 			n="${shard#*/}"
 			[ "$n" -lt 65536 ] || die "$name cannot be split further; logs: $LOGS"

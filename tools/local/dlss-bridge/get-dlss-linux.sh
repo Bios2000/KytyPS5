@@ -7,9 +7,9 @@
 #
 #   ./get-dlss-linux.sh [folder]     (default: this script's folder, the package's)
 #
-# It needs git and a C++ compiler (g++ or clang++): what is missing is installed with the distribution's package manager
-# (pacman, apt, dnf, zypper or xbps; sudo asks for the password). Vulkan's headers come from the system or are downloaded
-# too. DLSS_SDK_REF: another SDK version (a tag of github.com/NVIDIA/DLSS; default v310.9.16).
+# It needs git and a C++ compiler (g++ or clang++): what is missing it offers to install with the distribution's
+# package manager (pacman, apt, dnf, zypper or xbps; sudo asks for the password). Vulkan's headers come from the system
+# or are downloaded too. DLSS_SDK_REF: another SDK version (a tag of github.com/NVIDIA/DLSS; default v310.9.16).
 set -euo pipefail
 HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 SDK_REF="${DLSS_SDK_REF:-v310.9.16}"
@@ -56,7 +56,11 @@ if [ ${#missing[@]} -gt 0 ]; then
 	[ ${#install[@]} -gt 0 ] ||
 		{ echo "git and a C++ compiler (g++) are needed, and this distribution's package manager is not one this script knows: install them, then run it again" >&2; exit 1; }
 	[ "$(id -u)" = 0 ] || install=(sudo "${install[@]}")
-	echo "Installing what DLSS's build needs (${missing[*]/compiler/a C++ compiler}): ${install[*]}"
+	# (Asked first: it changes the system. Without a terminal to ask on, the command is shown instead.)
+	echo "DLSS's build needs ${missing[*]/compiler/a C++ compiler}: ${install[*]}"
+	answer=''
+	[ -t 0 ] && read -r -p "Install it now? [y/N] " answer
+	[[ "$answer" =~ ^[Yy] ]] || { echo "install it (the command above), then run this again" >&2; exit 1; }
 	[ "${install[0]}" != sudo ] || [ "${install[1]}" != apt-get ] || sudo apt-get update -qq || true
 	"${install[@]}" ||
 		{ echo "the install failed (a read-only system such as SteamOS? there: a distrobox, or install git and g++ some other way), then run it again" >&2; exit 1; }
