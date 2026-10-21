@@ -3,7 +3,6 @@
 #include "live-counters.h"
 #include "live-trace.h"
 #include "time-census.h"
-#include "writeback-verify.h"
 #include "fresh-memory.h"
 
 #include "common/assert.h"
@@ -31,10 +30,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <shared_mutex>
-#include <string>
 #include <thread>
-#include <type_traits>
-#include <unordered_map>
 #include <vector>
 
 #include <immintrin.h>
@@ -547,29 +543,6 @@ public:
 			return 0;
 		}
 		if (FullyCommitted(virtual_addr, size)) {
-			// KYTY_VERIFY_COMMITTED=1: the locked walk's answer compared (COMMITTED-MISMATCH lines; none over two
-			// rounds of the user's 1-1 route).
-			static const bool verify = std::getenv("KYTY_VERIFY_COMMITTED") != nullptr;
-			if (verify) {
-				Common::LockGuard lock(m_mutex);
-				uint64_t          covered = 0;
-				auto              it      = m_ranges.upper_bound(virtual_addr);
-				if (it != m_ranges.begin()) {
-					--it;
-					uint64_t expected = virtual_addr;
-					for (; it != m_ranges.end() && it->second.start <= expected && covered < size; ++it) {
-						const auto range_end = End(it->second.start, it->second.size);
-						if (range_end <= expected || !IsCommittedRangeType(it->second.type)) break;
-						covered += std::min(size - covered, range_end - expected);
-						expected = range_end;
-					}
-				}
-				static std::atomic<uint32_t> mismatches {0};
-				if (covered != size && mismatches.fetch_add(1, std::memory_order_relaxed) < 32)
-					std::printf("COMMITTED-MISMATCH addr=0x%llx size=0x%llx covered=0x%llx\n",
-					            static_cast<unsigned long long>(virtual_addr), static_cast<unsigned long long>(size),
-					            static_cast<unsigned long long>(covered));
-			}
 			return size;
 		}
 		struct CachedRange {
@@ -1406,15 +1379,6 @@ void WriteBacking(uint64_t vaddr, const void* data, uint64_t size, const char* s
 	const auto index = g_write_back_count.fetch_add(1, std::memory_order_relaxed);
 	g_write_backs[index % WriteBackRecords] = {std::chrono::steady_clock::now().time_since_epoch().count(),
 	                                          vaddr, size, source};
-	// (Diagnostic, KYTY_WRITEBACK_VERIFY: the GPU-owned pages checked before, hashed again after.)
-	struct Verify {
-		uint64_t vaddr, size;
-		bool     on;
-		~Verify() {
-			if (on) WritebackVerify::Rehash(vaddr, size);
-		}
-	} verify {vaddr, size, WritebackVerify::Enabled()};
-	if (verify.on) WritebackVerify::Check(vaddr, static_cast<const uint8_t*>(data), size, source);
 	if (TryWriteBacking(vaddr, data, size)) {
 		return;
 	}

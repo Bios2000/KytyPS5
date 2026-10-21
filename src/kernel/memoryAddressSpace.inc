@@ -268,48 +268,7 @@ public:
 			    std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start).count());
 			LiveCounters::Add(write ? LiveCounters::BackingWriteWaits : LiveCounters::BackingLockWaits);
 			LiveCounters::Add(write ? LiveCounters::BackingWriteWaitUs : LiveCounters::BackingLockWaitUs, us);
-			LogWaitStack(us, std::is_same_v<Lock, std::shared_lock<std::shared_mutex>> ? "map" : write ? "write" : "data");
 		}
-	}
-	// KYTY_BACKING_WAIT_STACK=<us> (diagnostics): the render thread's stack at a backing lock wait of at least <us>
-	// microseconds, once per distinct stack (64 at most), with the wait counted per stack in the summary lines.
-	static void LogWaitStack([[maybe_unused]] uint64_t us, [[maybe_unused]] const char* kind) {
-#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
-		static const uint64_t threshold = [] {
-			const char* value = std::getenv("KYTY_BACKING_WAIT_STACK");
-			return value != nullptr ? std::strtoull(value, nullptr, 10) : UINT64_MAX;
-		}();
-		if (us < threshold) return;
-		std::array<void*, 16> frames {};
-		unsigned long         hash  = 0;
-		const auto            count = RtlCaptureStackBackTrace(1, static_cast<unsigned long>(frames.size()), frames.data(), &hash);
-		struct Seen { uint64_t waits = 0, us = 0; };
-		static std::mutex                               mutex;
-		static std::unordered_map<unsigned long, Seen> seen;
-		uint64_t                                        waits = 0, sum = 0;
-		{
-			std::lock_guard guard(mutex);
-			if (seen.size() >= 64 && !seen.contains(hash)) return;
-			auto& entry = seen[hash];
-			waits = ++entry.waits;
-			sum = entry.us += us;
-		}
-		if (waits != 1 && (waits & (waits - 1)) != 0) return;
-		std::string text = "BACKING-WAIT " + std::string(kind) + " " + std::to_string(us) + " us (stack " +
-		                   std::to_string(hash) + ": " + std::to_string(waits) + " waits, " + std::to_string(sum) + " us):";
-		for (unsigned i = 0; i < count; i++) {
-			const auto address = reinterpret_cast<uint64_t>(frames[i]);
-			char       part[40];
-			std::snprintf(part, sizeof(part),
-			              address >= 0x140000000ull && address < 0x150000000ull ? " exe+0x%llx" : " 0x%llx",
-			              static_cast<unsigned long long>(address >= 0x140000000ull && address < 0x150000000ull
-			                                                  ? address - 0x140000000ull
-			                                                  : address));
-			text += part;
-		}
-		std::printf("%s\n", text.c_str());
-		std::fflush(stdout);
-#endif
 	}
 	std::shared_lock<std::shared_mutex> MapReadLock() {
 		std::shared_lock lock(m_mutex, std::defer_lock);
@@ -1025,94 +984,31 @@ public:
 	}
 
 	bool IsUniqueRange(uint64_t vaddr, uint64_t size) {
-		// KYTY_ALIAS_VERIFY: every answer is compared with the full rebuild it replaces.
-		static const bool verify = std::getenv("KYTY_ALIAS_VERIFY") != nullptr;
-		if (!verify) {
-			if (size == 0 || UINT64_MAX - vaddr < size) return false; // (as FindContainingUnlocked)
-			auto lock = MapReadLock();
-			// The mapping over each 256 KiB of address and whether no byte of it is mapped twice (the usual case), kept
-			// while its region's mappings (RegionEpoch) and the aliases anywhere (m_alias_epoch) stay the same: any range in
-			// such a mapping is unique. The game asks about ~1000 ranges a frame (and every write fault one), most of them
-			// new (ring buffers), in a few mappings: two cold tree lookups each. (By 4 MiB and one epoch for every mapping
-			// change, the game's ever finer mappings evicted each other and its streaming invalidated them all.)
-			struct Owner {
-				const GuestBackingStore* store;
-				uint64_t                 epoch, alias_epoch;
-				MapEntry                 entry;
-				bool                     unique;
-			};
-			thread_local std::array<Owner, 1024> owners {};
-			auto&      owner = owners[(vaddr >> 18u) % owners.size()];
-			const auto epoch = RegionEpoch(vaddr);
-			if (owner.store != this || owner.epoch != epoch || owner.alias_epoch != m_alias_epoch ||
-			    !GuestFreeRangeContains(owner.entry.vaddr, owner.entry.size, vaddr, size)) {
-				MapEntry entry {};
-				if (!FindContainingUnlocked(vaddr, size, &entry)) return false;
-				owner = {this, epoch, m_alias_epoch, entry, CoverageUnique(entry.backing_offset, entry.backing_offset + entry.size)};
-			}
-			if (owner.unique) return true;
-			const auto physical = owner.entry.backing_offset + vaddr - owner.entry.vaddr;
-			return CoverageUnique(physical, physical + size);
+		if (size == 0 || UINT64_MAX - vaddr < size) return false; // (as FindContainingUnlocked)
+		auto lock = MapReadLock();
+		// The mapping over each 256 KiB of address and whether no byte of it is mapped twice (the usual case), kept
+		// while its region's mappings (RegionEpoch) and the aliases anywhere (m_alias_epoch) stay the same: any range in
+		// such a mapping is unique. The game asks about ~1000 ranges a frame (and every write fault one), most of them
+		// new (ring buffers), in a few mappings: two cold tree lookups each. (By 4 MiB and one epoch for every mapping
+		// change, the game's ever finer mappings evicted each other and its streaming invalidated them all.)
+		struct Owner {
+			const GuestBackingStore* store;
+			uint64_t                 epoch, alias_epoch;
+			MapEntry                 entry;
+			bool                     unique;
+		};
+		thread_local std::array<Owner, 1024> owners {};
+		auto&      owner = owners[(vaddr >> 18u) % owners.size()];
+		const auto epoch = RegionEpoch(vaddr);
+		if (owner.store != this || owner.epoch != epoch || owner.alias_epoch != m_alias_epoch ||
+		    !GuestFreeRangeContains(owner.entry.vaddr, owner.entry.size, vaddr, size)) {
+			MapEntry entry {};
+			if (!FindContainingUnlocked(vaddr, size, &entry)) return false;
+			owner = {this, epoch, m_alias_epoch, entry, CoverageUnique(entry.backing_offset, entry.backing_offset + entry.size)};
 		}
-		std::lock_guard lock(m_mutex); // the full rebuild writes its intervals
-		const bool unique = IsUniqueRangeUnlocked(vaddr, size);
-		if (unique != IsUniqueRangeRebuilt(vaddr, size)) {
-			EXIT("alias coverage disagrees with the rebuilt intervals: vaddr=0x%016" PRIx64
-			     " size=0x%016" PRIx64 " coverage=%d mappings=%zu segments=%zu\n",
-			     vaddr, size, unique ? 1 : 0, m_maps.size(), m_coverage.size());
-		}
-		return unique;
-	}
-
-private:
-	bool IsUniqueRangeUnlocked(uint64_t vaddr, uint64_t size) const {
-		MapEntry owner {};
-		if (!FindContainingUnlocked(vaddr, size, &owner)) return false;
-		const auto physical = owner.backing_offset + vaddr - owner.vaddr;
+		if (owner.unique) return true;
+		const auto physical = owner.entry.backing_offset + vaddr - owner.entry.vaddr;
 		return CoverageUnique(physical, physical + size);
-	}
-
-	// The previous answer: the alias intervals of every mapping, rebuilt after each change.
-	bool IsUniqueRangeRebuilt(uint64_t vaddr, uint64_t size) {
-		MapEntry owner {};
-		if (!FindContainingUnlocked(vaddr, size, &owner)) return false;
-		if (!m_alias_ranges_valid) {
-			// Diagnostic (live measure: alias_rebuilds, alias_rebuild_us, alias_maps).
-			HoldTimer rebuild_time {LiveCounters::AliasRebuildUs};
-			LiveCounters::Add(LiveCounters::AliasRebuilds);
-			LiveCounters::Add(LiveCounters::AliasMaps, m_maps.size());
-			// Build physical intervals shared by at least two guest mappings.
-			// An alias elsewhere in a large allocation does not affect this range.
-			std::vector<std::pair<uint64_t, int>> endpoints;
-			endpoints.reserve(m_maps.size() * 2);
-			for (const auto& [_, entry] : m_maps) {
-				endpoints.emplace_back(entry.backing_offset, 1);
-				endpoints.emplace_back(entry.backing_offset + entry.size, -1);
-			}
-			std::sort(endpoints.begin(), endpoints.end());
-			m_aliased_physical_ranges.clear();
-			uint64_t previous = 0;
-			int active = 0;
-			for (size_t i = 0; i < endpoints.size();) {
-				const auto position = endpoints[i].first;
-				if (active > 1 && previous < position) {
-					if (!m_aliased_physical_ranges.empty() &&
-					    m_aliased_physical_ranges.back().second == previous)
-						m_aliased_physical_ranges.back().second = position;
-					else m_aliased_physical_ranges.emplace_back(previous, position);
-				}
-				do { active += endpoints[i++].second; }
-				while (i < endpoints.size() && endpoints[i].first == position);
-				previous = position;
-			}
-			EXIT_IF(active != 0);
-			m_alias_ranges_valid = true;
-		}
-		const auto physical = owner.backing_offset + vaddr - owner.vaddr;
-		const auto found = std::lower_bound(m_aliased_physical_ranges.begin(),
-		    m_aliased_physical_ranges.end(), physical,
-		    [](const auto& interval, uint64_t value) { return interval.second <= value; });
-		return found == m_aliased_physical_ranges.end() || physical + size <= found->first;
 	}
 
 private:
@@ -1393,7 +1289,6 @@ private:
 	}
 
 	void InvalidateMappingLookup() {
-		m_alias_ranges_valid = false;
 		if (++m_mapping_epoch == 0) m_mapping_epoch = 1;
 	}
 
@@ -1576,8 +1471,6 @@ private:
 	std::shared_mutex            m_mutex;
 	std::mutex                   m_data_mutex;
 	std::mutex                   m_cpu_write_mutex; // (TryWriteCpuBacking)
-	std::vector<std::pair<uint64_t, uint64_t>> m_aliased_physical_ranges;
-	bool m_alias_ranges_valid = false;
 	std::map<uint64_t, MapEntry> m_maps;
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 	// The file views of the guest mappings (base -> size): each view's mapped parts (m_maps) and parked ranges (m_parked)

@@ -873,7 +873,6 @@ void Image::PrepareReuse(const ImageInfo& image_info) {
 	track_addr          = 0;
 	track_addr_end      = 0;
 	untracked_holes.clear();
-	partial_hashes.clear();
 	depth_id            = {};
 	frame_accessed_last = 0;
 	staged_ring         = nullptr;

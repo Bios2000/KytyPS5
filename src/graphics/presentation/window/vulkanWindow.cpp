@@ -39,7 +39,6 @@
 #include "kernel/memory.h"
 #include "libs/controller.h"
 #include "loader/systemContent.h"
-#include "local-platform.h"
 #include "frame-gen.h"
 #ifdef KYTY_LOCAL_VULKAN_RECORDING
 #include "vulkan-recording.h"
@@ -1041,12 +1040,6 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
 		memory_priority.pNext          = const_cast<void*>(create_info.pNext);
 		create_info.pNext              = &memory_priority;
 	}
-	vk::PhysicalDevicePipelineExecutablePropertiesFeaturesKHR executable_features {};
-	if (graphics.pipeline_statistics_enabled) {
-		executable_features.pipelineExecutableInfo = VK_TRUE;
-		executable_features.pNext                  = const_cast<void*>(create_info.pNext);
-		create_info.pNext                          = &executable_features;
-	}
 	vk::PhysicalDeviceFaultFeaturesEXT fault_features {};
 	const bool fault_extension = HasExtension(device_extensions, VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
 	if (fault_extension) {
@@ -1065,15 +1058,7 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
 
 	// (Frame generation's device creation reserves host address space below 1 TiB: the range kept free for it, issue #45.)
 	LibKernel::Memory::ReleaseFrameGenAddressHole();
-	// KYTY_FRAMEGEN_VMMAP=1: the host address space from 4 GiB to 4 TiB before and after the device creation (what the
-	// driver reserves for it, issue #45).
-	static const bool vmmap = [] {
-		const char* value = std::getenv("KYTY_FRAMEGEN_VMMAP");
-		return value != nullptr && *value == '1';
-	}();
-	if (vmmap) LocalPlatform::LogAddressSpace("before vkCreateDevice", uint64_t {1} << 32u, uint64_t {1} << 42u);
 	auto result = physical_device.createDevice(&create_info, nullptr, &device);
-	if (vmmap) LocalPlatform::LogAddressSpace("after vkCreateDevice", uint64_t {1} << 32u, uint64_t {1} << 42u);
 	if (result != vk::Result::eSuccess) {
 		LOGF("vkCreateDevice failed: %s\n", vk::to_string(result).c_str());
 		std::printf("vkCreateDevice failed: %s (%u extensions)\n", vk::to_string(result).c_str(),
@@ -1525,13 +1510,6 @@ void WindowContext::CreateVulkan() {
 			if (HasExtension(available_extensions, extension)) {
 				device_extensions.push_back(extension);
 			}
-		}
-		// KYTY_PIPELINE_STATS=1 (a survey): each pipeline made again with the driver's statistics (shaders.cpp).
-		if (const char* stats = std::getenv("KYTY_PIPELINE_STATS");
-		    stats != nullptr && *stats == '1' &&
-		    HasExtension(available_extensions, VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME)) {
-			device_extensions.push_back(VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME);
-			graphic_ctx.pipeline_statistics_enabled = true;
 		}
 		// KYTY_GPU_CHECKPOINTS (diagnostic): the pipelines a GPU hang or fault ran (device-fault.h).
 		if (DeviceFault::CheckpointsRequested() &&

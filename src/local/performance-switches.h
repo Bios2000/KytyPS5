@@ -93,14 +93,14 @@ inline void InitializePerformanceSwitches() {
 	    Switch {"KYTY_RANGE_SET_FAST", &kyty_local_range_set_fast_mode},
 	    Switch {"KYTY_IMAGE_GRANULES", &kyty_local_image_granules_mode, 0, 2},
 	    Switch {"KYTY_TEXTURE_RESOLVE_PAGES", &kyty_local_texture_resolve_pages_mode},
-	    Switch {"KYTY_PARTIAL_IMAGE_DIRTY", &kyty_local_partial_image_dirty_mode, 0, 2},
+	    Switch {"KYTY_PARTIAL_IMAGE_DIRTY", &kyty_local_partial_image_dirty_mode},
 	    Switch {"KYTY_PARTIAL_ROW_BANDS", &kyty_local_partial_row_bands_mode},
 	    // Sampled views refresh only their levels of a streamed texture (default on; 0 for an A/B).
 	    Switch {"KYTY_TEXTURE_LEVELS", &kyty_local_texture_levels_mode},
 	    Switch {"KYTY_ASYNC_REPROTECT", &kyty_local_async_reprotect_mode},
 	    Switch {"KYTY_READBACK_NARROW", &kyty_local_readback_narrow_mode},
 	    // Also creates the transfer queue at device creation (vulkanWindow.cpp).
-	    Switch {"KYTY_READBACK_QUEUE", &kyty_local_readback_queue_mode, 0, 3},
+	    Switch {"KYTY_READBACK_QUEUE", &kyty_local_readback_queue_mode},
 	    // Images and command submission.
 	    Switch {"KYTY_IMAGE_BARRIER_DEDUPE", &kyty_local_image_barrier_dedupe},
 	    Switch {"KYTY_IMAGE_POOL", &kyty_local_image_pool_mode},

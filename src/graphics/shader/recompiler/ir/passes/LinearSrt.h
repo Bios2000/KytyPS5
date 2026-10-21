@@ -42,8 +42,6 @@ struct LinearSrtPlan {
 	std::vector<uint8_t>                              active_sources;
 	std::vector<std::shared_ptr<const LinearSrtPlan>> control_variants;
 	uint32_t                                          active_count = 0;
-	// Uses the add-with-carry lowering (KYTY_SRT_LINEAR_VERIFY compares it with the interpreter).
-	bool                                              add_carry = false;
 	// The generated register convention is explicit on every host, including
 	// Windows. C++ helpers bridge to the host ABI of reader callbacks.
 	using Function    = KYTY_SYSV_ABI bool (*)(const SrtRuntime*, uint64_t*);
@@ -345,7 +343,6 @@ private:
 						const auto lhs = Add(packed->Arg(0), clean, depth + 1);
 						const auto rhs = Add(packed->Arg(1), clean, depth + 1);
 						if (lhs == Invalid || rhs == Invalid) return Invalid;
-						result.add_carry = true;
 						Node sum;
 						sum.kind    = Kind::Binary;
 						sum.op      = ValueOpcode::IAdd32;

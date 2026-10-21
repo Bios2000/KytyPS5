@@ -806,9 +806,8 @@ struct PipelineCache::ProgramCache {
 		// What the translated groups held in memory before their plans were spilled (AddGroupMemory), summed by the
 		// workers as they finish them.
 		std::array<std::atomic<uint64_t>, PrefetchMemoryParts> memory {};
-		// Plans written to the scratch file (SpillPlan) and their bytes there; KYTY_PLAN_SPILL_VERIFY: reloads that saved
-		// differently.
-		std::atomic<uint64_t> spilled_plans {0}, spilled_plan_bytes {0}, spill_verify_failures {0};
+		// Plans written to the scratch file (SpillPlan) and their bytes there.
+		std::atomic<uint64_t> spilled_plans {0}, spilled_plan_bytes {0};
 	};
 	std::unique_ptr<Prefetch> prefetch;
 	// `prefetch` for threads without the pipeline cache's lock (GetPrefetchProgress, the live report): a warmup beside
@@ -1049,10 +1048,9 @@ struct PipelineCache::ProgramCache {
 				                 mib(MemPlanValues), mib(MemPlanMemoryInfo), mib(MemPlanOther), mib(MemPlanInfo), mib(MemModuleInfo),
 				                 mib(MemModuleTable), mib(MemModuleBda), mib(MemModuleBindings), mib(MemModuleSpecialization),
 				                 mib(MemGroup));
-				PipelineCacheLog("Shader prefetch: {} plans in the temporary file ({} MiB compressed), {} reloaded differently",
+				PipelineCacheLog("Shader prefetch: {} plans in the temporary file ({} MiB compressed)",
 				                 p.spilled_plans.load(std::memory_order_relaxed),
-				                 p.spilled_plan_bytes.load(std::memory_order_relaxed) >> 20u,
-				                 p.spill_verify_failures.load(std::memory_order_relaxed));
+				                 p.spilled_plan_bytes.load(std::memory_order_relaxed) >> 20u);
 			}
 		}
 	}
@@ -1123,20 +1121,6 @@ struct PipelineCache::ProgramCache {
 		if (!group.plan || !PlanSpillEnabled()) return;
 		std::vector<uint8_t> bytes;
 		if (!ResourcePlanSerial::Save(*group.plan, bytes) || bytes.size() > UINT32_MAX) return;
-		static const bool verify = std::getenv("KYTY_PLAN_SPILL_VERIFY") != nullptr;
-		if (verify) {
-			ShaderRecompiler::IR::ResourcePlan loaded;
-			std::vector<uint8_t>               again;
-			bool                               linear = false;
-			const bool                         reloaded = ResourcePlanSerial::Load(bytes, loaded, &linear);
-			loaded.linear_srt                           = group.plan->linear_srt;
-			if (!reloaded || linear != (group.plan->linear_srt != nullptr) || !ResourcePlanSerial::Save(loaded, again) ||
-			    again != bytes) {
-				if (p.spill_verify_failures.fetch_add(1, std::memory_order_relaxed) < 20)
-					PipelineCacheLog("Shader prefetch: plan of 0x{:016x} reloads differently", group.plan->shader_hash);
-				return;
-			}
-		}
 		const auto packed = ZstdPack(bytes.data(), bytes.size());
 		if (packed.empty()) return;
 		const auto packed_size = packed.size();
@@ -1397,7 +1381,6 @@ struct PipelineCache::ProgramCache {
 			EXIT_IF(module == nullptr);
 		}
 		LiveCounters::g_shader_modules.fetch_add(1, std::memory_order_relaxed);
-		if (InlineKeyCheck()) NoteInlineSpirv(module, spirv);
 		if (ModuleSpirvHashesRecorded()) {
 			NotePipelineKeyModule(module, options.shader_hash, XXH3_64bits(spirv.data(), spirv.size() * sizeof(uint32_t)),
 			                      spirv.size() * sizeof(uint32_t));
@@ -1407,10 +1390,10 @@ struct PipelineCache::ProgramCache {
 	}
 
 	// CreateModule for a prefetched module: a stored module of its SPIR-V where the prefetch's file has it (no copy), or
-	// null (the store is off; the SPIR-V validated, dumped or checked here).
+	// null (the store is off; the SPIR-V validated or dumped here).
 	vk::ShaderModule CreateModuleInPlace(const ShaderRecompiler::CompileOptions& options, const PrefetchedModule& prefetched) {
 		if (Config::ShaderValidationEnabled() || Config::GraphicsDebugDumpEnabled() || DumpWanted(options.shader_hash) ||
-		    InlineKeyCheck() || prefetched.spirv_words > UINT32_MAX)
+		    prefetched.spirv_words > UINT32_MAX)
 			return nullptr;
 		const auto bytes  = prefetched.spirv_words * sizeof(uint32_t);
 		const auto module = ModuleStore::AddFrom(

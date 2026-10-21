@@ -2127,10 +2127,6 @@ void TextureCache::InitializeImage(ImageId id) {
 		// A refill first: no GPU work at all, where a partial upload records some (and would end the refills: its
 		// copies come after the whole upload's, which a refill would then overwrite with older bytes).
 		bool uploaded = RefillUpload(image);
-		if (uploaded && kyty_local_partial_image_dirty_mode.load(std::memory_order_relaxed) == 2 &&
-		    PartialDirtyCandidate(image)) {
-			UpdatePartialHashes(image, true);
-		}
 		if (!uploaded && image.IsPartiallyCpuDirty() && !image.IsBufferModified()) {
 			g_partial_fail = "";
 			uploaded = UploadImagePartial(image);
@@ -2202,10 +2198,6 @@ void TextureCache::InitializeImage(ImageId id) {
 		if (!uploaded && UploadImageChunked(image)) {
 			uploaded            = true;
 			image.staged_ring   = nullptr;
-			if (kyty_local_partial_image_dirty_mode.load(std::memory_order_relaxed) == 2 &&
-			    PartialDirtyCandidate(image)) {
-				UpdatePartialHashes(image, true);
-			}
 		}
 		if (!uploaded) {
 			bool refillable = false;
@@ -2237,10 +2229,6 @@ void TextureCache::InitializeImage(ImageId id) {
 			image.staged_ring   = refillable ? source : nullptr;
 			image.staged_offset = source_offset;
 			image.staged_serial = m_scheduler.CommandSerial();
-			if (kyty_local_partial_image_dirty_mode.load(std::memory_order_relaxed) == 2 &&
-			    PartialDirtyCandidate(image)) {
-				UpdatePartialHashes(image, true);
-			}
 		}
 		image.ClearBufferModified();
 	}
@@ -2302,75 +2290,7 @@ void DirtyRowBands(const std::vector<std::pair<uint64_t, uint64_t>>& dirty, uint
 	}
 }
 
-[[nodiscard]] uint64_t HashGuestRange(uint64_t vaddr, uint64_t size) {
-	if (const auto* data = LibKernel::Memory::TryGetBackingPointer(vaddr, size)) {
-		return XXH3_64bits(data, static_cast<size_t>(size));
-	}
-	thread_local std::vector<uint8_t> bytes;
-	bytes.resize(size);
-	if (!LibKernel::Memory::TryReadBacking(vaddr, bytes.data(), size) &&
-	    !LibKernel::Memory::TryReadPrtBacking(vaddr, bytes.data(), size)) {
-		// Unreadable (unbacked sparse pages): equal to itself until the pages become readable.
-		return 0x5ca1ab1e0ddba11ull;
-	}
-	return XXH3_64bits(bytes.data(), static_cast<size_t>(size));
-}
-
 } // namespace
-
-// KYTY_PARTIAL_IMAGE_DIRTY=2: every granule of a large image is hashed at a whole upload, and the
-// dirty granules again after a partial one; a partial upload first checks that the granules it
-// leaves alone still hold the data uploaded last time (a write the page watchers missed).
-void TextureCache::UpdatePartialHashes(Image& image, bool all) {
-	const auto& info  = image.info;
-	const auto  count = (info.data.size + PartialDirtyGranule - 1) / PartialDirtyGranule;
-	if (image.partial_hashes.size() != count) {
-		if (!all) {
-			return;
-		}
-		image.partial_hashes.assign(count, 0);
-	}
-	for (uint64_t index = 0; index < count; index++) {
-		const auto begin = info.data.address + index * PartialDirtyGranule;
-		const auto size  = std::min(PartialDirtyGranule, info.data.End() - begin);
-		if (all || IntersectsRanges(image.CpuDirtyRanges(), begin, begin + size)) {
-			image.partial_hashes[index] = HashGuestRange(begin, size);
-		}
-	}
-}
-
-bool TextureCache::CheckPartialHashes(const Image& image) {
-	const auto& info  = image.info;
-	const auto  count = (info.data.size + PartialDirtyGranule - 1) / PartialDirtyGranule;
-	if (image.partial_hashes.size() != count) {
-		std::printf("PARTIAL VERIFY no baseline addr=0x%llx size=0x%llx\n",
-		            static_cast<unsigned long long>(info.data.address),
-		            static_cast<unsigned long long>(info.data.size));
-		return false;
-	}
-	uint64_t mismatches = 0;
-	uint64_t first      = 0;
-	for (uint64_t index = 0; index < count; index++) {
-		const auto begin = info.data.address + index * PartialDirtyGranule;
-		const auto size  = std::min(PartialDirtyGranule, info.data.End() - begin);
-		if (!IntersectsRanges(image.CpuDirtyRanges(), begin, begin + size) &&
-		    HashGuestRange(begin, size) != image.partial_hashes[index]) {
-			if (mismatches++ == 0) {
-				first = begin;
-			}
-		}
-	}
-	if (mismatches != 0) {
-		std::printf("PARTIAL VERIFY mismatch addr=0x%llx size=0x%llx granules=%llu first=0x%llx "
-		            "dirty_ranges=%zu\n",
-		            static_cast<unsigned long long>(info.data.address),
-		            static_cast<unsigned long long>(info.data.size),
-		            static_cast<unsigned long long>(mismatches), static_cast<unsigned long long>(first),
-		            image.CpuDirtyRanges().size());
-		return false;
-	}
-	return true;
-}
 
 // A depth array whose CPU writes cover some layers (the game's 80-layer shadow-map pool, whose free 4 MiB layers its
 // texture streamer fills from the CPU): only those layers are staged, detiled and copied (of [first_layer, last_layer)
@@ -2662,10 +2582,6 @@ bool TextureCache::UploadImagePartial(Image& image, uint64_t window_begin, uint6
 	    plan.tiles.size() != plan.regions.size()) {
 		return PartialFail("plan");
 	}
-	if (kyty_local_partial_image_dirty_mode.load(std::memory_order_relaxed) == 2 &&
-	    !CheckPartialHashes(image)) {
-		return PartialFail("hashes");
-	}
 	// The subresources over the dirty ranges (region i is the copy of tile i), or the rows of
 	// blocks over them (KYTY_PARTIAL_ROW_BANDS).
 	struct Pick {
@@ -2794,9 +2710,6 @@ bool TextureCache::UploadImagePartial(Image& image, uint64_t window_begin, uint6
 	LiveCounters::Add(LiveCounters::PartialUploads);
 	LiveCounters::Add(LiveCounters::PartialUploadBytes, total);
 	LogPartialUpload(image, pieces.size(), total);
-	if (kyty_local_partial_image_dirty_mode.load(std::memory_order_relaxed) == 2) {
-		UpdatePartialHashes(image, false);
-	}
 	return true;
 }
 

@@ -307,8 +307,6 @@ private:
 	                                         uint64_t& end);
 	// A sampled view's refresh of its levels (the others stay dirty); false: RefreshImage's.
 	[[nodiscard]] bool RefreshTextureLevels(ImageId id, const ImageViewInfo& view);
-	void               UpdatePartialHashes(Image& image, bool all);
-	[[nodiscard]] bool CheckPartialHashes(const Image& image);
 	void                      MarkAsMaybeDirty(ImageId id, Image& image);
 	void                      TrackImageDownload(ImageId id, Image& image);
 	[[nodiscard]] static bool SameBacking(const ImageInfo& cached, const ImageInfo& requested,
