@@ -85,7 +85,7 @@ folder (usually named `PPSA01341-app0`).
 ## Starting the game
 
 **Double-click `launcher.cmd`** for a small settings window: the game folder, the resolution with the
-aspect ratio, render height and upscaler beside it, fullscreen (optionally keeping the aspect ratio with
+aspect ratio, render height, upscaler and game output beside it, fullscreen (optionally keeping the aspect ratio with
 black bars), the console language and red-zone protection,
 with buttons to play, to precompile the shaders (optionally on the efficiency cores only, so the PC
 stays responsive), and to open the logs folder. It remembers the settings (`launcher-settings.json`).
@@ -98,7 +98,7 @@ display in Windows' display settings (the game is told the TV takes HDR); otherw
 "Render height" (1440 by default, as on the PS5) is the height the game renders its 3D at before it
 upscales it to its 4K picture; lower heights (1296, 1152, 1080, 900) are faster where the graphics card
 limits the frame rate (a laptop RTX 3080 at Boletaria's start: 20.7 fps at 1440, 24.8 at 1080) and
-less sharp. The interface stays 4K either way.
+less sharp. The interface keeps the game output's size either way.
 "Aspect ratio" (16:9 by default, as on the PS5) renders the 3D wider for ultrawide displays: 21:9
 (3416x1440 at render height 1440) or 32:9, seeing more to the sides, not a stretched 16:9 picture. In
 play the HUD keeps its shape: health, magic, stamina and the equipment at the left edge, the souls at
@@ -128,6 +128,12 @@ With an "Aspect ratio" wider than 16:9, DLSS makes the picture at its full width
 instead of a 3840x2160 picture widened on the screen. On an RTX 5090 at Boletaria's start that ran at 64.5 fps,
 the game's TAA at 21:9 at 59.3. Screens without the 3D (movies, the title, loading) are stretched to the
 width, as without DLSS.
+"Game output" (4K by default, as on the PS5) with "1080p" runs the game's own HD mode, the one a PS5 takes on
+a 1080p TV: its post-processing and HUD at 1920x1080 instead of 3840x2160 scaled down to the window afterwards,
+and its 3D at most 1080 high (a higher render height is lowered to 1080). Less work for the graphics card: at
+Boletaria's start on an RTX 5090, 69.8 fps at 4K, 78.3 at 1080p. It suits 1080p screens; on larger ones the
+picture is softer than the 4K output's. DLSS makes the 4K output, so with "DLSS (PS5 Pro path)" this row stays
+at 4K.
 "Frame generation" (DLSS, 2x to 6x; NVIDIA RTX 40 or newer, 3x and up RTX 50) uses NVIDIA's Streamline
 runtime, which this package does not include: download the Streamline SDK (a release zip from
 https://github.com/NVIDIA-RTX/Streamline/releases), unpack it and choose its folder with the launcher's
@@ -187,6 +193,7 @@ shortcut):
 | `-Game <folder>` | The game folder (or a `.zar` archive of it) |
 | `-Language 11` | The console language, as the PS5 numbers them (0 Japanese, 1 English (US), 11 Chinese (Simplified), ...; the launcher lists them) |
 | `-RenderHeight 1080` | The height the game renders its 3D at (720–1440, default 1440 as on the PS5): lower is faster on a slow graphics card and less sharp |
+| `-HdOutput` | The game's own 1080p output (the launcher's "Game output: 1080p"): post-processing and HUD at 1920×1080, the 3D at most 1080 high; not with `-Upscaler dlss` |
 | `-Aspect 21:9` | The 3D rendered wider (`21:9` or `32:9`) for ultrawide displays; the HUD keeps its shape at the sides; in-game menus, movies and loading screens are stretched to the width (with `-AspectFit` too: movies, the title and loading screens keep their 16:9, with black bars at the sides) |
 | `-Quality low` | How much the game draws: `low` or `lowest` (shorter shadows, simpler distant detail), faster where the processor limits the frame rate |
 | `-TextureReduce 2` | Large textures without their largest levels: `1` half the size per side (the default with less than 12 GB of video memory), `2` a quarter, `0` whole |
