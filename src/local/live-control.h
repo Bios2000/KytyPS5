@@ -16,6 +16,7 @@
 //   timecensus <seconds>          time-related HLE calls per guest caller (time-census.h)
 //   glide <x> <y> <z> <speed>     Demon's Souls 01.007.000: the player walks there (warp requests, no input)
 //   pad <lx> <ly> <rx> <ry> <buttons> <seconds>   scripted pad input (sticks 0..255, -1 the host's; buttons hex)
+//   screenshot <path>             the next frame shown, read back from the GPU, as a PPM file (screenshot.h)
 //   sleep <seconds>
 // Without KYTY_LIVE_FILE nothing runs; the flip hook is one relaxed increment.
 
@@ -29,6 +30,7 @@
 #include "loader/demonsSoulsWarp.h"
 #include "local-platform.h"
 #include "perf-overlay.h"
+#include "screenshot.h"
 #include "slow-log.h"
 #include "time-census.h"
 
@@ -647,6 +649,10 @@ inline void Run(uint64_t id, const std::string& line) {
 	} else if (cmd == "fatal") {
 		// fatal: a fatal error on this thread, the path a crash takes (log, then the process ends).
 		EXIT("live fatal: a test of the fatal-error exit\n");
+	} else if (cmd == "screenshot" && n >= 2) {
+		// screenshot <path>: the next frame shown, as a PPM file (screenshot.h; "SCREENSHOT <path>" once written).
+		Libs::Graphics::Screenshot::Request(arg1);
+		std::printf("LIVE_SCREENSHOT id=%" PRIu64 " path=%s\n", id, arg1);
 	} else if (cmd == "sleep" && n >= 2) {
 		std::this_thread::sleep_for(std::chrono::duration<double>(std::strtod(arg1, nullptr)));
 	} else if (cmd == "capture" && n >= 2) {

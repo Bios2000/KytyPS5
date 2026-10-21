@@ -18,6 +18,7 @@
 #include "vulkan-recording.h"
 #endif
 #include "frame-gen.h"
+#include "screenshot.h"
 #include "frame-gen-hudless.h"
 #include "local-platform.h"
 #include "perf-overlay.h"
@@ -793,7 +794,18 @@ struct Presenter::Impl {
 			                                         composed.usage, 0, 0};
 			count = FrameGen::Generate(command.Handle(), frame.fg.valid && !frame.reusing_last ? &frame.fg : nullptr,
 			                           backbuffer, swapchain.PresentRegion(), outputs);
+			// (A live `screenshot`: the finished frame and the frame generated before it.)
+			const auto shot      = Screenshot::Take();
+			auto       capture   = Screenshot::Record(window.graphic_ctx, command.Handle(), composed, shot);
+			auto       generated_capture =
+			    count > 0 && !shot.empty() ? Screenshot::Record(window.graphic_ctx, command.Handle(), generated[0], shot + ".gen.ppm")
+			                               : Screenshot::Pending {};
 			frame.present_tick = present_scheduler.Submit();
+			if (capture.buffer != VK_NULL_HANDLE || generated_capture.buffer != VK_NULL_HANDLE) {
+				present_scheduler.Wait(frame.present_tick);
+				Screenshot::Finish(window.graphic_ctx, capture);
+				Screenshot::Finish(window.graphic_ctx, generated_capture);
+			}
 		}
 
 		// The game's frame time (the time between its frames here), smoothed; long gaps (a load, a pause) left out.
@@ -1660,7 +1672,13 @@ void Presenter::Present(Frame& frame, bool reuse) {
 				FrameGen::ScaleHudless(m_impl->window.graphic_ctx, command.Handle(), frame.fg, swapchain.Extent(),
 				                       swapchain.PresentRegion(), swapchain.Format());
 			}
+			// (A live `screenshot`: the game's picture as the presenter got it.)
+			auto capture       = Screenshot::Record(m_impl->window.graphic_ctx, command.Handle(), frame.image, Screenshot::Take());
 			frame.present_tick = swapchain.Submit(m_impl->present_scheduler);
+			if (capture.buffer != VK_NULL_HANDLE) {
+				m_impl->present_scheduler.Wait(frame.present_tick);
+				Screenshot::Finish(m_impl->window.graphic_ctx, capture);
+			}
 		}
 #if defined(_WIN32)
 		// The Windows driver waits in vkQueuePresentKHR, inside the kernel, for the semaphore's

@@ -419,6 +419,8 @@ list(APPEND kyty_emulator_src
 	"${KYTY_SOURCE_DIR}/local/frame-gen.cpp"
 	"${KYTY_SOURCE_DIR}/local/frame-gen-hudless.h"
 	"${KYTY_SOURCE_DIR}/local/frame-gen-hudless.cpp"
+	"${KYTY_SOURCE_DIR}/local/screenshot.h"
+	"${KYTY_SOURCE_DIR}/local/screenshot.cpp"
 	"${KYTY_SOURCE_DIR}/local/debug-snapshot.h"
 	"${KYTY_SOURCE_DIR}/local/debug-snapshot.cpp"
 	"${KYTY_SOURCE_DIR}/local/perf-overlay.h"
