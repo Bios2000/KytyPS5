@@ -96,7 +96,7 @@ jobs:
           call build-windows.cmd kyty_emulator || exit /b 1
           call build-windows.cmd kyty_shader_precompile || exit /b 1
 
-      # The settings window (launcher-windows: WPF on .NET Framework 4.6.2, which every Windows 10 and 11 has).
+      # The settings window (launcher-windows: WPF on .NET Framework 4.7.2, part of Windows 10 and 11).
       - name: Build launcher
         shell: cmd
         run: call launcher-windows\build.cmd || exit /b 1

@@ -91,7 +91,7 @@ latency), **Graphics** (upscaler, render height, game output, graphics preset, f
 language, cheats), **Shaders** (precompile, optionally on the efficiency cores only so the PC stays responsive;
 export shader hints) and **Advanced** (performance overlay, red-zone protection, safe GPU mode, the launcher's
 language, the logs folder). It remembers the settings (`launcher-settings.json`) and needs nothing installed (.NET
-Framework 4.6.2, part of Windows 10 and 11). Windows may ask before its first start ("More info", "Run anyway"):
+Framework 4.7.2, part of Windows 10 and 11). Windows may ask before its first start ("More info", "Run anyway"):
 it is not signed. The earlier PowerShell window (`launcher.ps1`) still works.
 "Up to 120 fps" (off by default) lets the game render up to 120 frames a second instead of the
 console's 60 where the PC is fast enough: play keeps its speed, and movies, menus and loading screens

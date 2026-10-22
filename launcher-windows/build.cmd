@@ -1,6 +1,6 @@
 @echo off
 rem Builds KytyLauncher.exe into _Build\launcher with Visual Studio's MSBuild (any edition or the Build Tools with the
-rem .NET desktop workload; .NET Framework 4.6.2 targeting pack). The release workflow builds it the same way.
+rem .NET desktop workload; .NET Framework 4.7.2 targeting pack). The release workflow builds it the same way.
 setlocal
 set "vswhere=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
 if not exist "%vswhere%" (
