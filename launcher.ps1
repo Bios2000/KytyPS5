@@ -333,7 +333,7 @@ function Get-PlayCommand {
 	if (!$fsrOn -and $frameGenAvailable -and [int]$settings.framegen -ge 2) { $arguments += @('-FrameGen', ([int]$settings.framegen - 1)) }
 	if ($dlss) { $arguments += @('-Upscaler', 'dlss') }
 	# (DLSS makes the 4K output: the 1080p output only with the game's own upscale.)
-	if (!$dlss -and $settings.output -eq '1080p') { $arguments += '-HdOutput' }
+	if ($settings.output -eq '1080p') { $arguments += '-HdOutput' }
 	if ($frameGenAvailable -and ((!$fsrOn -and [int]$settings.framegen -ge 2) -or $dlss)) { $arguments += @('-StreamlineDir', "`"$streamline`"") }
 	# Switches of the config, one -Set argument (run-windows.ps1 splits it at the commas).
 	$sets = @()
@@ -531,15 +531,14 @@ Add-Row 'Aspect ratio' @($ratio, $ratioNote)
 Add-Row 'Render height' @($render, $renderNote)
 Add-Row 'Upscaler' @($upscaler, $upscalerNote)
 # The game's output (run-windows.ps1 -HdOutput, src/loader/demonsSoulsHdOutput.h): 4K, or the game's own 1080p mode, its
-# post-processing and HUD at 1920x1080 and its 3D at most 1080 high. DLSS makes the 4K output: the row is off with it.
+# post-processing and HUD at 1920x1080 and its 3D at most 1080 high (with DLSS: DLSS upscales the 3D to that 1080p).
 $output = New-Object System.Windows.Forms.ComboBox -Property @{ DropDownStyle = 'DropDownList'; Width = 205 }
 $output.Items.AddRange(@('4K (PS5)', '1080p'))
 $output.SelectedIndex = if ($settings.output -eq '1080p') { 1 } else { 0 }
 $outputNote = New-Object System.Windows.Forms.Label -Property @{ AutoSize = $true; ForeColor = 'Gray'; Margin = '6,6,0,0'
-	Text = '1080p: the game''s own HD mode, effects and HUD at 1920x1080; less GPU work; not with DLSS' }
-$output.Enabled = $upscaler.SelectedIndex -ne 1
+	Text = '1080p: the game''s HD layout, effects and HUD at 1920x1080; less GPU work; with DLSS, DLSS makes the 1080p picture' }
 $output.Add_SelectedIndexChanged({ Update-RenderNote })
-$upscaler.Add_SelectedIndexChanged({ $output.Enabled = $upscaler.SelectedIndex -ne 1; Update-RenderNote })
+$upscaler.Add_SelectedIndexChanged({ Update-RenderNote })
 Add-Row 'Game output' @($output, $outputNote)
 Update-RenderNote
 $fullscreen = New-Object System.Windows.Forms.CheckBox -Property @{ Text = 'Fullscreen'; AutoSize = $true; Checked = [bool]$settings.fullscreen }

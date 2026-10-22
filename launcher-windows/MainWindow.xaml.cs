@@ -490,7 +490,6 @@ partial class MainWindow : Window {
 			Changed();
 		};
 		output = Combo(new[] { new Choice(T("output.4k"), "4k"), new Choice(T("output.1080"), "1080p") }, S.Str("output") == "1080p" ? 1 : 0);
-		output.IsEnabled = !renderForDlss;
 		output.SelectionChanged += (s, e) => UpdateRenderNote();
 		upscaler.SelectionChanged += (s, e) => {
 			if (building) return;
@@ -498,7 +497,6 @@ partial class MainWindow : Window {
 			S.Set(renderForDlss ? "render_dlss" : "render", renderWanted);
 			renderForDlss = upscaler.SelectedIndex == 1;
 			renderWanted = renderForDlss ? S.Int("render_dlss") : S.Int("render");
-			output.IsEnabled = !renderForDlss;
 			SelectRenderHeight();
 			UpdateRenderNote();
 			Changed();
@@ -801,7 +799,7 @@ partial class MainWindow : Window {
 	void UpdateSummary() {
 		var res = S.Str("resolution").Replace("x", "×");
 		var dlss = commands.Dlss;
-		var hdOutput = !dlss && S.Str("output") == "1080p";
+		var hdOutput = S.Str("output") == "1080p";
 		var height = dlss ? S.Int("render_dlss") : S.Int("render");
 		if (hdOutput && height > 1080) height = 1080;
 		string frameGeneration;
