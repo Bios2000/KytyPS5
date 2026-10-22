@@ -854,6 +854,26 @@ endif()
 add_executable(kyty_emulator "${KYTY_SOURCE_DIR}/main.cpp" ${kyty_emulator_src})
 configure_macos_guest_address_space(kyty_emulator)
 
+# Windows: the programs' version information (src/kyty.rc.in; a program without any looked more like a trojan to
+# antivirus programs' machine learning, issue #135).
+if(WIN32)
+	string(REPLACE "." "," KYTY_RC_VERSION_COMMAS "${KYTY_VERSION}.0")
+	foreach(program kyty_emulator kyty_shader_precompile)
+		if(TARGET ${program})
+			# (The precompile program runs as the emulator, a link named kyty_emulator.exe - precompile-windows.ps1: AMD's
+			# driver keys its pipelines by the program's name -, so it is named the same here too.)
+			set(KYTY_RC_NAME kyty_emulator)
+			if(program STREQUAL "kyty_emulator")
+				set(KYTY_RC_DESCRIPTION "KytyPS5 PS5 emulator")
+			else()
+				set(KYTY_RC_DESCRIPTION "KytyPS5 shader precompile")
+			endif()
+			configure_file("${KYTY_SOURCE_DIR}/kyty.rc.in" "${PROJECT_BINARY_DIR}/${program}.rc" @ONLY)
+			target_sources(${program} PRIVATE "${PROJECT_BINARY_DIR}/${program}.rc")
+		endif()
+	endforeach()
+endif()
+
 if(LINUX)
 	set_property(SOURCE
 		"${KYTY_SOURCE_DIR}/graphics/guest_gpu/graphicsRun.cpp"
