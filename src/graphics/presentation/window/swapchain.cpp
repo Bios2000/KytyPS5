@@ -1589,7 +1589,8 @@ RenderContext& Presenter::Renderer() const noexcept {
 }
 
 bool Presenter::FlipRateApplies(const Frame& frame) noexcept {
-	return !FrameGen::Enabled() || frame.fg.valid;
+	// The game's 3D view only (with frame generation, the frames carrying its inputs): a capped movie played at half speed.
+	return FrameGen::Enabled() ? frame.fg.valid : frame.scene;
 }
 
 bool Presenter::IsSceneFrame(const Frame& frame) noexcept {

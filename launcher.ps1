@@ -306,8 +306,8 @@ function Get-PlayCommand {
 		if ($settings.aspect -and $settings.ratio -notin '21:9', '32:9') { $arguments += '-AspectFit' }
 	}
 	if (!$settings.redzone) { $arguments += '-NoRedZone' }
-	# KytyLauncher.exe's 30 fps lock (Experimental) before 120 fps.
-	if ($settings.fps30) { $arguments += @('-Vblank', '30') } elseif ($settings.fps120) { $arguments += '-Fps120' }
+	# (KytyLauncher.exe's 30 fps lock, Experimental: KYTY_FLIP_RATE=1 below, at 60 Hz.)
+	if ($settings.fps120 -and !$settings.fps30) { $arguments += '-Fps120' }
 	# Presents wait for the display's refresh (Vulkan FIFO): no tearing, and G-SYNC/FreeSync displays keep adapting.
 	if ($settings.vsync) { $arguments += @('-PresentMode', 'Fifo') }
 	# One frame queued instead of about two ($lowLatencyTip).
@@ -345,6 +345,7 @@ function Get-PlayCommand {
 	# KytyLauncher.exe's experiments: direct presentation (issue #37), AMD Anti-Lag and memory kept resident (issue #50).
 	if ($settings.present_direct) { $sets += 'KYTY_PRESENT_DIRECT=1' }
 	if ($settings.antilag) { $sets += 'KYTY_ANTI_LAG=1' }
+	if ($settings.fps30) { $sets += 'KYTY_FLIP_RATE=1' }
 	if ($settings.keep_resident) { $sets += @('KYTY_RESIDENT_MB=6144', 'KYTY_WORKING_SET_TRIM=0') }
 	if ($sets.Count) { $arguments += @('-Set', ($sets -join ',')) }
 	if ($settings.game) { $arguments += @('-Game', "`"$($settings.game)`"") }

@@ -206,7 +206,7 @@ shortcut):
 | `-Quality low` | How much the game draws: `low` or `lowest` (shorter shadows, simpler distant detail), faster where the processor limits the frame rate |
 | `-TextureReduce 2` | Large textures without their largest levels: `1` half the size per side (the default with less than 12 GB of video memory), `2` a quarter, `0` whole |
 | `-Fps120` | The game's frame rate up to 120 fps instead of 60 (the launcher's "Up to 120 fps") |
-| `-Vblank 30` | The game locked to a steady 30 fps, at the same game speed: half the work, even frame times (the launcher's Experimental "Lock to 30 fps") |
+| `-Set KYTY_FLIP_RATE=1` | The game locked to a steady 30 fps, at the same game speed: half the work, even frame times; movies and menus stay at 60 (the launcher's Experimental "Lock to 30 fps") |
 | `-PresentMode Fifo` | VSync on (the launcher's "VSync") |
 | `-LowLatency` | Less input lag: one frame waiting for the screen instead of about two (the launcher's "Low latency") |
 | `-Hdr` | HDR10 output when Windows' "Use HDR" is on for the display |
