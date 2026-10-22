@@ -588,7 +588,7 @@ partial class MainWindow : Window {
 	// one as the upscaler's default (DLSS 1080, the game's TAA 1440).
 	void SelectRenderHeight() {
 		var most = MaxRenderHeight();
-		var allowed = RenderHeights.Where(h => h <= most && (!renderForDlss || (HdOutputChosen ? h <= 1080 : h >= 1080))).ToList();
+		var allowed = RenderHeights.Where(h => h <= most && (!renderForDlss || (HdOutputChosen ? h <= 1080 : h >= 1080 || h == 720))).ToList();
 		if (HdOutputChosen) allowed.AddRange(LowRenderHeights.Where(h => renderForDlss || h >= 540));
 		fillingRender = true;
 		var was = building;
@@ -625,8 +625,8 @@ partial class MainWindow : Window {
 		// (The 1080p output's 3D is at most 1080 high.)
 		var capped = output != null && output.IsEnabled && output.SelectedIndex == 1 && h > 1080;
 		if (capped) h = 1080;
-		// (DLSS's 4K output takes 1080 at least: the game's super resolution runs from there.)
-		var raised = renderForDlss && (output == null || output.SelectedIndex != 1) && h < 1080;
+		// (DLSS's 4K output takes 1080 at least, or 720 for its ultra performance: a third of the output.)
+		var raised = renderForDlss && (output == null || output.SelectedIndex != 1) && h < 1080 && h != 720;
 		if (raised) h = 1080;
 		var w = (int)(Math.Floor(h * RatioAspect() / 8.0 + 0.5) * 8);
 		renderNote.Text = F(capped ? "render.capped" : raised ? "render.raised" : "render.desc", w, h);
@@ -846,7 +846,7 @@ partial class MainWindow : Window {
 		var height = dlss ? S.Int("render_dlss") : S.Int("render");
 		if (hdOutput && height > 1080) height = 1080;
 		// (DLSS's 4K output takes 1080 at least, as its render height list.)
-		if (dlss && !hdOutput && height < 1080) height = 1080;
+		if (dlss && !hdOutput && height < 1080 && height != 720) height = 1080;
 		string frameGeneration;
 		if (context.FsrAvailable && S.Bool("fsr")) frameGeneration = T("summary.fsr");
 		else if (context.FrameGenAvailable && S.Int("framegen") >= 2) frameGeneration = "DLSS " + S.Int("framegen") + "x";

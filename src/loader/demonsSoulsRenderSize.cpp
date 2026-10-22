@@ -210,11 +210,19 @@ void Install(Program* program) {
 		            "upscaler); 16:9\n");
 		aspect = 0.0;
 	}
-	if (trinity && !hd_pro && requested >= LeastRenderHeight && requested < SuperResolutionLeastHeight) {
-		std::printf("Demon's Souls render size: KYTY_RENDER_HEIGHT=%u is below the game's super resolution (1080 at "
-		            "least); 1080 instead\n",
-		            requested);
-		requested = SuperResolutionLeastHeight;
+	// The super resolution path: a third of the output's height (DLSS's ultra performance, which takes only that) or half
+	// of it and more (its other modes); a height between the two goes up to the half, one below the third up to it
+	// (issue #129: 720 with the 4K output, 360 with the 1080p one).
+	if (trinity && requested >= LeastRenderHeight) {
+		const uint32_t output = hd_pro ? DemonsSoulsHdOutput::HdHeight : OutputHeight;
+		const uint32_t third = output / 3, half = output / 2;
+		const uint32_t fitted = requested < third ? third : requested > third && requested < half ? half : requested;
+		if (fitted != requested) {
+			std::printf("Demon's Souls render size: KYTY_RENDER_HEIGHT=%u: the super resolution takes a third of the %u "
+			            "output (%u) or half of it and more; %u instead\n",
+			            requested, output, third, fitted);
+			requested = fitted;
+		}
 	}
 	if (requested == game_height && aspect == 0.0) return;
 	auto size = RenderSizeFor(requested, aspect != 0.0 ? aspect : GameAspect);
@@ -275,15 +283,17 @@ void Install(Program* program) {
 		}
 	}
 	if (hd_pro) {
-		// The PS5 Pro path's 1080p output (the wide output's places at 1920x1080), and its super resolution from this
-		// render height on (the game's own 1080 at least otherwise).
+		// The PS5 Pro path's 1080p output (the wide output's places at 1920x1080).
 		if (!InstallWideOutput(*program, mode, DemonsSoulsHdOutput::HdWidth, DemonsSoulsHdOutput::HdHeight))
 			std::printf("Demon's Souls render size: the PS5 Pro path's output settings of a known build not found; its "
 			            "4K output kept\n");
-		if (!DemonsSoulsSuperResolution::SetLeastHeight(program, size.height))
-			std::printf("Demon's Souls render size: the super resolution's least height of a known build not found; it "
-			            "runs from 1080 only\n");
 	}
+	// Its super resolution from this render height on (the game's own 1080 at least otherwise): the 1080p output's, and
+	// the 4K output's 720 (DLSS's ultra performance).
+	if (trinity && (hd_pro || size.height < SuperResolutionLeastHeight) &&
+	    !DemonsSoulsSuperResolution::SetLeastHeight(program, size.height))
+		std::printf("Demon's Souls render size: the super resolution's least height of a known build not found; it "
+		            "runs from 1080 only\n");
 	std::printf("Demon's Souls render size: %s mode renders %ux%u instead of %ux%u (output %ux%u)%s\n",
 	            hd ? "HD" : "performance", size.width, size.height, game_width, game_height,
 	            g_wide_output != 0 ? g_wide_output : out_width, out_height,

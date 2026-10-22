@@ -129,7 +129,7 @@ and the shadows of torches and other lamps. Each thing drawn costs the emulator 
 help where the processor limits the frame rate (a laptop Ryzen 9 5900HX standing at the Gates of
 Boletaria: 21.9 fps at Standard, 25.6 at Lowest).
 "Upscaler" (Game by default, as on the PS5) with "DLSS (PS5 Pro path)" runs the game's own PS5 Pro mode:
-its 3D at the render height (1080 at least) is made a real 3840x2160 image by NVIDIA DLSS in place of Sony's
+its 3D at the render height (1080 at least, or 720 for DLSS's Ultra Performance) is made a real 3840x2160 image by NVIDIA DLSS in place of Sony's
 PS5 Pro upscaler, and the game finishes it at 4K (bloom, depth of field, the HUD), instead of anti-aliasing
 at the render height and stretching to 4K. The launcher keeps a render height for each upscaler: DLSS starts
 at 1080, DLSS's Performance (on an RTX 5090 about the frame rate of the game's own TAA at 1440, with a
