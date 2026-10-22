@@ -36,7 +36,7 @@ partial class MainWindow : Window {
 		{ "32:9", new[] { "3840x1080", "5120x1440", "7680x2160" } },
 	};
 	// The height Demon's Souls renders its 3D at (run-windows.ps1 -RenderHeight); its output and UI stay 3840x2160.
-	static readonly int[] RenderHeights = { 2160, 1800, 1620, 1512, 1440, 1296, 1152, 1080, 900 };
+	static readonly int[] RenderHeights = { 2160, 1800, 1620, 1512, 1440, 1296, 1152, 1080, 900, 720 };
 
 	// (--screenshot pictures: no game art, another path shown.)
 	public static bool ScreenshotNoArt;
@@ -600,8 +600,11 @@ partial class MainWindow : Window {
 		// (The 1080p output's 3D is at most 1080 high.)
 		var capped = output != null && output.IsEnabled && output.SelectedIndex == 1 && h > 1080;
 		if (capped) h = 1080;
+		// (DLSS's 4K output takes 1080 at least: the game's super resolution runs from there.)
+		var raised = renderForDlss && (output == null || output.SelectedIndex != 1) && h < 1080;
+		if (raised) h = 1080;
 		var w = (int)(Math.Floor(h * RatioAspect() / 8.0 + 0.5) * 8);
-		renderNote.Text = F(capped ? "render.capped" : "render.desc", w, h);
+		renderNote.Text = F(capped ? "render.capped" : raised ? "render.raised" : "render.desc", w, h);
 	}
 
 	void UpdateUpscalerNote() {
