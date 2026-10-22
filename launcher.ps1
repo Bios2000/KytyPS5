@@ -49,7 +49,7 @@ $safeGpuTip = "Prevents the crashes and blue screens that come from the graphics
 $settings = [ordered]@{ game = ''; resolution = '2560x1440'; fullscreen = $false; aspect = $true; language = 1; redzone = $true; cheats = $false;
 	ecores = $false; fps120 = $false; render = 1440; ratio = '16:9'; quality = 'standard'; vsync = $false; hdr = $false; framegen = 0
 	hud = 0; streamline = ''; safegpu = $false; upscaler = ''; render_dlss = 1080; fsr = $false; output = '4k'
-	lowlatency = $false; present_direct = $false; antilag = $false; keep_resident = $false }
+	lowlatency = $false; present_direct = $false; antilag = $false; keep_resident = $false; fps30 = $false }
 if (Test-Path $settingsPath) {
 	$saved = Get-Content $settingsPath -Raw | ConvertFrom-Json
 	foreach ($property in $saved.PSObject.Properties) { if ($settings.Contains($property.Name)) { $settings[$property.Name] = $property.Value } }
@@ -306,7 +306,8 @@ function Get-PlayCommand {
 		if ($settings.aspect -and $settings.ratio -notin '21:9', '32:9') { $arguments += '-AspectFit' }
 	}
 	if (!$settings.redzone) { $arguments += '-NoRedZone' }
-	if ($settings.fps120) { $arguments += '-Fps120' }
+	# KytyLauncher.exe's 30 fps lock (Experimental) before 120 fps.
+	if ($settings.fps30) { $arguments += @('-Vblank', '30') } elseif ($settings.fps120) { $arguments += '-Fps120' }
 	# Presents wait for the display's refresh (Vulkan FIFO): no tearing, and G-SYNC/FreeSync displays keep adapting.
 	if ($settings.vsync) { $arguments += @('-PresentMode', 'Fifo') }
 	# One frame queued instead of about two ($lowLatencyTip).

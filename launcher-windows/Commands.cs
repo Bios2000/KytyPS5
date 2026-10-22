@@ -44,7 +44,9 @@ sealed class Commands {
 			if (S.Bool("aspect") && !wide) arguments.Add("-AspectFit");
 		}
 		if (!S.Bool("redzone")) arguments.Add("-NoRedZone");
-		if (S.Bool("fps120")) arguments.Add("-Fps120");
+		// The 30 fps lock (Experimental) before 120 fps: a 30 Hz vblank, the game stepping 1/30 s a frame.
+		if (S.Bool("fps30")) arguments.AddRange(new[] { "-Vblank", "30" });
+		else if (S.Bool("fps120")) arguments.Add("-Fps120");
 		// Presents wait for the display's refresh (Vulkan FIFO): no tearing, and G-SYNC/FreeSync displays keep adapting.
 		if (S.Bool("vsync")) arguments.AddRange(new[] { "-PresentMode", "Fifo" });
 		// (AMD Anti-Lag, an experiment, works on top of low latency.)

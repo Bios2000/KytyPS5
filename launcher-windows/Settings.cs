@@ -22,6 +22,7 @@ sealed class Settings {
 		new object[] {"lowlatency", false}, new object[] {"ui_language", ""},
 		// (Experimental page.)
 		new object[] {"present_direct", false}, new object[] {"antilag", false}, new object[] {"keep_resident", false},
+		new object[] {"fps30", false},
 	};
 
 	readonly string path;

@@ -59,7 +59,7 @@ partial class MainWindow : Window {
 	TextBox gamePath;
 	ComboBox resolution, ratio, render, upscaler, output, quality, frameGen, language, hud, uiLanguage;
 	CheckBox fullscreen, aspect, hdr, fps120, vsync, lowLatency, fsr, cheats, redzone, safeGpu, ecores, presentDirect, antiLag,
-		keepResident;
+		keepResident, fps30;
 	TextBlock renderNote, upscalerNote, frameGenNote, streamlineText, cheatState, bannerTitle, bannerLine, storeLine;
 	Image banner;
 	Border bannerFallback;
@@ -727,8 +727,12 @@ partial class MainWindow : Window {
 		presentDirect = Switch(S.Bool("present_direct"));
 		antiLag = Switch(S.Bool("antilag") && context.AmdGpu, context.AmdGpu);
 		keepResident = Switch(S.Bool("keep_resident"));
+		fps30 = Switch(S.Bool("fps30"));
 		return Page("experimental.title",
 			Desc(T("experimental.intro")),
+			Section("experimental.framerate"),
+			Row("fps30", fps30, Desc(T("fps30.desc"))),
+			Row(null, Feedback(85)),
 			Section("experimental.display"),
 			Row("presentdirect", presentDirect, Desc(T("presentdirect.desc"))),
 			Row(null, Feedback(37)),
@@ -790,6 +794,7 @@ partial class MainWindow : Window {
 		S.Set("present_direct", presentDirect.IsChecked == true);
 		S.Set("antilag", antiLag.IsChecked == true && context.AmdGpu);
 		S.Set("keep_resident", keepResident.IsChecked == true);
+		S.Set("fps30", fps30.IsChecked == true);
 		S.Save();
 	}
 
@@ -806,7 +811,8 @@ partial class MainWindow : Window {
 		var qualityKey = "quality." + (S.Str("quality").Length == 0 ? "standard" : S.Str("quality"));
 		var options = new List<string>();
 		if (S.Bool("vsync")) options.Add(T("summary.vsync"));
-		if (S.Bool("fps120")) options.Add(T("summary.fps120"));
+		if (S.Bool("fps30")) options.Add(T("summary.fps30"));
+		else if (S.Bool("fps120")) options.Add(T("summary.fps120"));
 		if (S.Bool("lowlatency")) options.Add(T("lowlatency"));
 		if (S.Bool("hdr")) options.Add(T("summary.hdr"));
 		if (hdOutput) options.Add(T("summary.hd"));
