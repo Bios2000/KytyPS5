@@ -24,7 +24,7 @@ $resolutionsByRatio = @{
 $renderHeights = '2160 (native 4K)', '1800', '1620', '1512 (PS5 Pro)', '1440 (PS5)', '1296', '1152', '1080', '900', '720'
 # What makes the 3840x2160 image of the 3D (run-windows.ps1 -Upscaler): the game's TAA and stretch (the PS5's), or DLSS in
 # place of Sony's PS5 Pro upscaler on the game's PS5 Pro path (NVIDIA's Streamline runtime, as frame generation).
-$upscalers = 'Game (PS5)', 'DLSS (PS5 Pro path)'
+$upscalers = 'Game (PS5)', 'DLSS (PS5 Pro path)', 'FSR 3 (PS5 Pro path)'
 # The aspect ratio of Demon's Souls' 3D (run-windows.ps1 -Aspect): wider sees more to the sides.
 $ratios = '16:9 (PS5)', '21:9', '32:9'
 # Demon's Souls' own settings for what a frame draws (run-windows.ps1 -Quality): shorter shadows, simpler distant detail;
@@ -371,8 +371,10 @@ function Get-PlayCommand {
 		if ($patch) { $arguments += @('-Patch', "`"$patch`"") }
 	}
 	$dlss = $frameGenAvailable -and $settings.upscaler -eq 'dlss'
-	# The upscaler's own render height (with DLSS always passed: the PS5 Pro path's own height is 1512).
-	$height = if ($dlss) { [int]$settings.render_dlss } else { [int]$settings.render }
+	# FSR 3 upscaling, built into the emulator: any graphics card (KytyLauncher.exe's Commands.FsrUpscaler).
+	$fsrUpscaler = $settings.upscaler -eq 'fsr'
+	# The upscaler's own render height (with DLSS or FSR 3 always passed: the PS5 Pro path's own height is 1512).
+	$height = if ($dlss -or $fsrUpscaler) { [int]$settings.render_dlss } else { [int]$settings.render }
 	if ($height -gt 0) { $arguments += @('-RenderHeight', $height) }
 	if ($settings.ratio -in '21:9', '32:9') { $arguments += @('-Aspect', $settings.ratio) }
 	if ($settings.quality -in 'low', 'lowest') {
@@ -381,7 +383,7 @@ function Get-PlayCommand {
 	$fsrOn = $fsrAvailable -and $settings.fsr
 	if ($fsrOn) { $arguments += '-Fsr' }
 	if (!$fsrOn -and $frameGenAvailable -and [int]$settings.framegen -ge 2) { $arguments += @('-FrameGen', ([int]$settings.framegen - 1)) }
-	if ($dlss) { $arguments += @('-Upscaler', 'dlss') }
+	if ($dlss) { $arguments += @('-Upscaler', 'dlss') } elseif ($fsrUpscaler) { $arguments += @('-Upscaler', 'fsr') }
 	# (DLSS makes the 4K output: the 1080p output only with the game's own upscale.)
 	if (Test-HdOutput) { $arguments += '-HdOutput' }
 	if ($frameGenAvailable -and ((!$fsrOn -and [int]$settings.framegen -ge 2) -or $dlss)) { $arguments += @('-StreamlineDir', "`"$streamline`"") }
@@ -602,7 +604,7 @@ function Update-RenderNote {
 	$capped = (Test-HdOutputShown) -and $h -gt 1080
 	if ($capped) { $h = 1080 }
 	# (DLSS's 4K output takes 1080 at least.)
-	$raised = $upscaler.SelectedIndex -eq 1 -and !(Test-HdOutputShown) -and $h -lt 1080 -and $h -ne 720
+	$raised = $upscaler.SelectedIndex -ge 1 -and !(Test-HdOutputShown) -and $h -lt 1080 -and $h -ne 720
 	if ($raised) { $h = 1080 }
 	$w = [Math]::Floor($h * (Get-RatioAspect) / 8.0 + 0.5) * 8
 	$renderNote.Text = if ($capped) { "Demon's Souls' 3D at ${w}x${h} (1080 at most with the 1080p output)" } elseif ($raised) { "Demon's Souls' 3D at ${w}x${h} (1080 at least with DLSS's 4K output)" } else { "Demon's Souls' 3D at ${w}x${h}; higher = sharper, needs more GPU" }
@@ -611,7 +613,7 @@ $render.Add_SelectedIndexChanged({
 	if (!$script:fillingRender) { $script:renderWanted = [int](([string]$render.SelectedItem -split ' ')[0]) }
 	Update-RenderNote
 })
-$renderForDlss = $frameGenAvailable -and $settings.upscaler -eq 'dlss'
+$renderForDlss = ($frameGenAvailable -and $settings.upscaler -eq 'dlss') -or $settings.upscaler -eq 'fsr'
 $renderWanted = [int]$(if ($renderForDlss) { $settings.render_dlss } else { $settings.render })
 Select-RenderHeight
 Update-RenderNote
@@ -620,9 +622,9 @@ $ratio.Add_SelectedIndexChanged({
 	Select-RenderHeight
 	Update-RenderNote
 })
-$upscaler = New-Object System.Windows.Forms.ComboBox -Property @{ DropDownStyle = 'DropDownList'; Width = 205; Enabled = $frameGenAvailable }
+$upscaler = New-Object System.Windows.Forms.ComboBox -Property @{ DropDownStyle = 'DropDownList'; Width = 205 }
 $upscaler.Items.AddRange($upscalers)
-$upscaler.SelectedIndex = if ($frameGenAvailable -and $settings.upscaler -eq 'dlss') { 1 } else { 0 }
+$upscaler.SelectedIndex = if ($frameGenAvailable -and $settings.upscaler -eq 'dlss') { 1 } elseif ($settings.upscaler -eq 'fsr') { 2 } else { 0 }
 $upscalerNote = New-Object System.Windows.Forms.Label -Property @{ AutoSize = $true; ForeColor = 'Gray'; Margin = '6,6,0,0' }
 function Update-UpscalerNote {
 	$upscalerNote.Text = if ($frameGenAvailable) { 'DLSS: NVIDIA RTX; 1440 = Quality, 1080 = Performance, 2160 = DLAA' }
@@ -640,7 +642,7 @@ Update-UpscalerNote
 $upscaler.Add_SelectedIndexChanged({
 	# The height chosen goes back to the upscaler it was for; the newly chosen one's is shown.
 	if ($script:renderForDlss) { $settings.render_dlss = $script:renderWanted } else { $settings.render = $script:renderWanted }
-	$script:renderForDlss = $upscaler.SelectedIndex -eq 1
+	$script:renderForDlss = $upscaler.SelectedIndex -ge 1
 	$script:renderWanted = [int]$(if ($script:renderForDlss) { $settings.render_dlss } else { $settings.render })
 	Select-RenderHeight
 	Update-RenderNote
@@ -738,7 +740,6 @@ $frameGenFolder.Add_Click({
 	# (Without an NVIDIA RTX graphics card the folder is kept, the rows stay off.)
 	$script:frameGenAvailable = $rtxGpu
 	$frameGen.Enabled = $rtxGpu
-	$upscaler.Enabled = $rtxGpu
 	Update-FrameGenNote
 	Update-UpscalerNote
 })
@@ -796,7 +797,10 @@ function Read-Form {
 	$settings.output     = @('auto', '4k', '1080p')[[Math]::Max(0, $output.SelectedIndex)]
 	# (Kept as it was where the DLLs are missing.)
 	if ($frameGenAvailable) { $settings.framegen = if ($frameGen.SelectedIndex -gt 0) { $frameGen.SelectedIndex + 1 } else { 0 } }
-	if ($frameGenAvailable) { $settings.upscaler = if ($upscaler.SelectedIndex -eq 1) { 'dlss' } else { '' } }
+	# (DLSS kept as it was where its DLLs are missing; FSR 3 and the game's own anywhere.)
+	if ($upscaler.SelectedIndex -eq 2) { $settings.upscaler = 'fsr' }
+	elseif ($upscaler.SelectedIndex -eq 1) { if ($frameGenAvailable) { $settings.upscaler = 'dlss' } }
+	elseif ($frameGenAvailable -or $settings.upscaler -ne 'dlss') { $settings.upscaler = '' }
 	if ($fsrAvailable) { $settings.fsr = $fsr.Checked }
 	$settings.ecores     = $ecores.Checked
 	Save-Settings

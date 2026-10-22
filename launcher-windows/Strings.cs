@@ -67,7 +67,7 @@ static class Strings {
 		{"fsr.none", "AMD FSR 3: amd_fidelityfx_vk.dll is not next to the emulator (README)"},
 
 		{"summary.window", "{0} window"}, {"summary.fullscreen", "{0} fullscreen"}, {"summary.render", "3D {0}p"},
-		{"summary.taa", "game's TAA"}, {"summary.dlss", "DLSS"}, {"summary.fg", "frame generation {0}"},
+		{"summary.taa", "game's TAA"}, {"summary.dlss", "DLSS"}, {"summary.fsr3", "FSR 3"}, {"summary.fg", "frame generation {0}"},
 		{"summary.fsr", "FSR 3 frame generation"}, {"summary.hd", "1080p output"}, {"summary.hdr", "HDR"},
 		{"summary.vsync", "VSync"}, {"summary.fps120", "up to 120 fps"},
 
@@ -90,7 +90,9 @@ static class Strings {
 		{"render.capped", "Demon's Souls' 3D at {0}x{1} (1080 at most with the 1080p output)."},
 		{"render.raised", "Demon's Souls' 3D at {0}x{1} (with DLSS's 4K output 1080 at least, or 720 for its Ultra Performance)."},
 		{"render.native", "native 4K"}, {"render.pro", "PS5 Pro"}, {"render.ps5", "PS5"},
-		{"upscaler", "Upscaler"}, {"upscaler.game", "Game (PS5)"}, {"upscaler.dlss", "DLSS (PS5 Pro path)"},
+		{"upscaler", "Upscaler"}, {"upscaler.game", "Game (PS5)"}, {"upscaler.dlss", "DLSS (PS5 Pro path)"}, {"upscaler.fsr", "FSR 3 (PS5 Pro path)"},
+		{"upscaler.fsrNote", "AMD FSR 3 in place of Sony's PS5 Pro upscaler, on any graphics card (built in, nothing to download): sharper than the game's stretch. Each render height shows the mode it runs in with the chosen game output."},
+		{"fsr.native", "Native AA"},
 		{"upscaler.ok", "DLSS in place of Sony's PS5 Pro upscaler: sharper than the game's stretch. Each render height shows the DLSS mode it runs in with the chosen game output."},
 		{"upscaler.noRtx", "DLSS needs an NVIDIA RTX graphics card: here the game's own TAA makes the picture."},
 		{"upscaler.noStreamline", "DLSS needs NVIDIA's Streamline SDK: choose its folder under Frame generation."},
@@ -201,7 +203,7 @@ static class Strings {
 		{"fsr.none", "AMD FSR 3：模拟器旁没有 amd_fidelityfx_vk.dll（见说明文档）"},
 
 		{"summary.window", "窗口 {0}"}, {"summary.fullscreen", "全屏 {0}"}, {"summary.render", "3D {0}p"},
-		{"summary.taa", "游戏 TAA"}, {"summary.dlss", "DLSS"}, {"summary.fg", "帧生成 {0}"},
+		{"summary.taa", "游戏 TAA"}, {"summary.dlss", "DLSS"}, {"summary.fsr3", "FSR 3"}, {"summary.fg", "帧生成 {0}"},
 		{"summary.fsr", "FSR 3 帧生成"}, {"summary.hd", "1080p 输出"}, {"summary.hdr", "HDR"},
 		{"summary.vsync", "垂直同步"}, {"summary.fps120", "最高 120 帧"},
 
@@ -224,7 +226,9 @@ static class Strings {
 		{"render.capped", "3D 画面为 {0}x{1}（1080p 输出时最高 1080）。"},
 		{"render.raised", "3D 画面为 {0}x{1}（DLSS 的 4K 输出时最低 1080，或 720 用于超级性能模式）。"},
 		{"render.native", "原生 4K"}, {"render.pro", "PS5 Pro"}, {"render.ps5", "PS5"},
-		{"upscaler", "超分辨率"}, {"upscaler.game", "游戏自带（PS5）"}, {"upscaler.dlss", "DLSS（PS5 Pro 路径）"},
+		{"upscaler", "超分辨率"}, {"upscaler.game", "游戏自带（PS5）"}, {"upscaler.dlss", "DLSS（PS5 Pro 路径）"}, {"upscaler.fsr", "FSR 3（PS5 Pro 路径）"},
+		{"upscaler.fsrNote", "用 AMD FSR 3 替代索尼的 PS5 Pro 超分，任何显卡都能用（已内置，无需下载）：比游戏自带的拉伸更清晰。渲染高度列表标出了每个高度在所选游戏输出下对应的模式。"},
+		{"fsr.native", "原生抗锯齿"},
 		{"upscaler.ok", "用 DLSS 替代索尼的 PS5 Pro 超分：比游戏自带的拉伸更清晰。渲染高度列表标出了每个高度在所选游戏输出下对应的 DLSS 模式。"},
 		{"upscaler.noRtx", "DLSS 需要 NVIDIA RTX 显卡：当前由游戏自带的 TAA 生成画面。"},
 		{"upscaler.noStreamline", "DLSS 需要 NVIDIA Streamline SDK：请在下方「帧生成」中选择其文件夹。"},

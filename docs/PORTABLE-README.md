@@ -135,8 +135,11 @@ at the render height and stretching to 4K. The launcher keeps a render height fo
 at 1080, DLSS's Performance (on an RTX 5090 about the frame rate of the game's own TAA at 1440, with a
 sharper picture); 1440 is its Quality, 1512 the PS5 Pro's own 2688x1512, 2160 DLAA. NVIDIA RTX only, with
 NVIDIA's Streamline runtime as for frame generation below: on a PC without an NVIDIA RTX graphics card (AMD,
-Intel, GeForce GTX) the launcher keeps this row and frame generation off, and the game's own TAA makes the
-picture at its own render height. The in-game "Cinematic" mode stays native 4K without DLSS.
+Intel, GeForce GTX) the launcher offers no DLSS. "FSR 3 (PS5 Pro path)" does the same with AMD's FSR 3 in place of
+DLSS, on any graphics card, AMD and Intel included: it is built into the emulator, nothing to download
+(`run.cmd -Upscaler fsr`; on an RTX 5090 at Boletaria's start 75.8 fps from 1080 to 4K, a picture close to DLSS's).
+The render heights show their mode as with DLSS (FSR's "Native AA" at the output's own size). The in-game
+"Cinematic" mode stays native 4K without DLSS or FSR.
 With an "Aspect ratio" wider than 16:9, DLSS makes the picture at its full width: 5120x2160 at 21:9 (from
 2560x1080 at render height 1080), and the game finishes it at that size, with the HUD at the screen's edges,
 instead of a 3840x2160 picture widened on the screen. On an RTX 5090 at Boletaria's start that ran at 64.5 fps,
@@ -223,6 +226,7 @@ shortcut):
 | `-LowLatency` | Less input lag: one frame waiting for the screen instead of about two (the launcher's "Low latency") |
 | `-Hdr` | HDR10 output when Windows' "Use HDR" is on for the display |
 | `-Upscaler dlss` | DLSS super resolution through the game's PS5 Pro path (NVIDIA RTX, needs Streamline: see "Upscaler" above) |
+| `-Upscaler fsr` | The same with AMD FSR 3, built in: any graphics card |
 | `-FrameGen 1` | DLSS frame generation, the number of generated frames per rendered one (`1` = 2x, up to `5`; RTX 40 or newer, needs Streamline) |
 | `-Gpu 1` | The graphics card on a PC with more than one: its number in the log's `Vulkan GPU <n>:` lines, or a part of its name (`-Gpu 4090`); give `precompile.cmd` the same `-Gpu`, so the shaders are compiled for that card. Without it the first discrete GPU, in the order Windows' graphics settings give |
 | `-Set KEY=VALUE` | An emulator switch, e.g. `-Set KYTY_SHADER_PREFETCH=0` (several: `-Set A=1,B=2`); the issues name the ones worth trying |

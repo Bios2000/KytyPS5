@@ -441,9 +441,9 @@ if (KYTY_CLANG_CL)
 endif()
 
 set(kyty_emulator_link_libraries common Vulkan::Headers spirv-tools-opt spirv-tools SDL2-static imgui xxhash FFmpeg::ffmpeg fmt::fmt nlohmann_json::nlohmann_json LibAtrac9 kyty_git_version Zydis::Zydis xbyak::xbyak libzstd_static)
-# Linux: AMD FidelityFX FSR 3 built from source (3rdparty/fidelityfx) for KYTY_UPSCALER=fsr
-# (src/local/fsr-native.h); Windows loads AMD's runtime instead (frame-gen.cpp).
-if (LINUX)
+# Linux and Windows: AMD FidelityFX FSR 3 built from source (3rdparty/fidelityfx) for KYTY_UPSCALER=fsr
+# (src/local/fsr-native.h); Windows' FSR frame generation loads AMD's runtime instead (frame-gen.cpp).
+if (LINUX OR WIN32)
 	list(APPEND kyty_emulator_link_libraries kyty_fidelityfx)
 endif()
 

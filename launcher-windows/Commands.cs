@@ -33,6 +33,8 @@ sealed class Commands {
 	}
 
 	public bool Dlss { get { return context.FrameGenAvailable && S.Str("upscaler") == "dlss"; } }
+	// FSR 3 upscaling, built into the emulator: any graphics card.
+	public bool FsrUpscaler { get { return S.Str("upscaler") == "fsr"; } }
 
 	// The game window's height in pixels: in full screen the display's, else the chosen size's (a window larger than the
 	// display is shrunk by the emulator); 0 when unknown.
@@ -87,8 +89,9 @@ sealed class Commands {
 			if (patch != null) arguments.AddRange(new[] { "-Patch", Quote(patch) });
 		}
 		var dlss = Dlss;
-		// The upscaler's own render height (a chosen height is always passed: without one the game follows the window).
-		var height = dlss ? S.Int("render_dlss") : S.Int("render");
+		// The upscaler's own render height (a chosen height is always passed: without one the game follows the window);
+		// DLSS and FSR 3 share the PS5 Pro path's.
+		var height = dlss || FsrUpscaler ? S.Int("render_dlss") : S.Int("render");
 		if (height > 0) arguments.AddRange(new[] { "-RenderHeight", Number(height) });
 		if (wide) arguments.AddRange(new[] { "-Aspect", ratio });
 		var quality = S.Str("quality").ToLowerInvariant();
@@ -98,6 +101,7 @@ sealed class Commands {
 		var frameGen = S.Int("framegen");
 		if (!fsrOn && context.FrameGenAvailable && frameGen >= 2) arguments.AddRange(new[] { "-FrameGen", Number(frameGen - 1) });
 		if (dlss) arguments.AddRange(new[] { "-Upscaler", "dlss" });
+		else if (FsrUpscaler) arguments.AddRange(new[] { "-Upscaler", "fsr" });
 		// (With DLSS too: its PS5 Pro path then makes the 1080p output, the 3D at most 1080 high.)
 		if (HdOutput) arguments.Add("-HdOutput");
 		if (context.FrameGenAvailable && ((!fsrOn && frameGen >= 2) || dlss)) arguments.AddRange(new[] { "-StreamlineDir", Quote(context.Streamline) });

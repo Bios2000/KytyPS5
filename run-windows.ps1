@@ -19,6 +19,7 @@
 #   .\run-windows.ps1 -Upscaler dlss         DLSS super resolution: Demon's Souls' own PS5 Pro path (its 3D at
 #                                            2688x1512 or -RenderHeight, 1080 and up or 720), DLSS in place of Sony's
 #                                            upscaler making the 3840x2160 image; NVIDIA's Streamline runtime
+#   .\run-windows.ps1 -Upscaler fsr          the same with AMD's FSR 3 built in (any graphics card, nothing to download)
 #   .\run-windows.ps1 -StreamlineDir <dir>   where NVIDIA's Streamline runtime is (the Streamline SDK
 #                                            or its bin\x64; default: a "streamline" folder next to
 #                                            the emulator)
@@ -83,7 +84,7 @@ param(
 	[switch]$AspectFit,
 	[int]$Language = -1,
 	[int]$FrameGen = 0,
-	[ValidateSet('', 'dlss')][string]$Upscaler = '',
+	[ValidateSet('', 'dlss', 'fsr')][string]$Upscaler = '',
 	[string]$StreamlineDir = '',
 	[switch]$Fsr,
 	[string]$Affinity = '',
@@ -310,13 +311,13 @@ if ($AspectFit) { $environment['KYTY_PRESENT_ASPECT'] = 'fit' }
 # -LowLatency: src/graphics/presentation/videoOut.cpp's FlipQueue (fc1e9cf4).
 if ($LowLatency) { $environment['KYTY_LOW_LATENCY'] = '1' }
 if ($FrameGen -gt 0) { $environment['KYTY_FRAMEGEN'] = "$FrameGen" }
-# -Upscaler dlss: src/loader/demonsSoulsSuperResolution.h.
+# -Upscaler dlss|fsr: src/loader/demonsSoulsSuperResolution.h (fsr: src/local/fsr-native.h).
 if ($Upscaler) { $environment['KYTY_UPSCALER'] = $Upscaler }
 # -Fsr: FSR 3.1 (one generated frame; no Streamline).
 if ($Fsr) { $environment['KYTY_FRAMEGEN'] = '1'; $environment['KYTY_FRAMEGEN_BACKEND'] = 'fsr'; $FrameGen = 0 }
 # Without -StreamlineDir, the Streamline folder chosen in the launcher (launcher-settings.json), as the launcher passes
 # it: run.cmd -FrameGen 1 had started with frame generation off, its runtime not found (issue #38).
-if (!$StreamlineDir -and ($FrameGen -gt 0 -or $Upscaler) -and (Test-Path "$PSScriptRoot\launcher-settings.json")) {
+if (!$StreamlineDir -and ($FrameGen -gt 0 -or $Upscaler -eq 'dlss') -and (Test-Path "$PSScriptRoot\launcher-settings.json")) {
 	$chosen = try { [string](Get-Content "$PSScriptRoot\launcher-settings.json" -Raw | ConvertFrom-Json).streamline } catch { '' }
 	if ($chosen -and (Test-Path $chosen)) { $StreamlineDir = $chosen }
 }
