@@ -9,6 +9,8 @@ namespace KytyLauncher {
 //   --dry-run <file>       the play, precompile and hints commands the current settings make, written to <file>
 //   --screenshot <folder>  each page rendered to <folder>\<page>.png, then exit
 //   --lang en|zh           the window's language for this run (the saved choice otherwise)
+//   --no-art               (with --screenshot) no game art in the banner
+//   --demo-path <text>     (with --screenshot) the game path box shows <text> (pictures for the release notes)
 public partial class App : Application {
 	protected override void OnStartup(StartupEventArgs e) {
 		base.OnStartup(e);
@@ -17,7 +19,9 @@ public partial class App : Application {
 			if (e.Args[i] == "--dry-run") dryRun = e.Args[++i];
 			else if (e.Args[i] == "--screenshot") screenshots = e.Args[++i];
 			else if (e.Args[i] == "--lang") lang = e.Args[++i];
+			else if (e.Args[i] == "--demo-path") KytyLauncher.MainWindow.ScreenshotPath = e.Args[++i];
 		}
+		KytyLauncher.MainWindow.ScreenshotNoArt = Array.IndexOf(e.Args, "--no-art") >= 0;
 		var context = new LauncherContext();
 		context.Settings.ReadOnly = dryRun != null || screenshots != null;
 		if (lang != null) Strings.Language = lang == "zh" ? UiLanguage.Chinese : UiLanguage.English;
@@ -35,7 +39,7 @@ public partial class App : Application {
 			return;
 		}
 		var window = new MainWindow(context);
-		MainWindow = window;
+		base.MainWindow = window;
 		if (screenshots != null) {
 			window.SaveScreenshots(screenshots);
 			Shutdown(0);

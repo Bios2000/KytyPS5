@@ -37,6 +37,10 @@ partial class MainWindow : Window {
 	// The height Demon's Souls renders its 3D at (run-windows.ps1 -RenderHeight); its output and UI stay 3840x2160.
 	static readonly int[] RenderHeights = { 2160, 1800, 1620, 1512, 1440, 1296, 1152, 1080, 900 };
 
+	// (--screenshot pictures: no game art, another path shown.)
+	public static bool ScreenshotNoArt;
+	public static string ScreenshotPath;
+
 	readonly LauncherContext context;
 	readonly Commands commands;
 	readonly List<FrameworkElement> pages = new List<FrameworkElement>();
@@ -307,7 +311,7 @@ partial class MainWindow : Window {
 		bannerTitle.Text = info.Found ? (info.Name.Length != 0 ? info.Name : info.TitleId) : T("play.choose");
 		bannerLine.Text = info.Found ? info.TitleId + "  ·  " + info.Version : "";
 		banner.Source = null;
-		if (info.Picture != null) {
+		if (info.Picture != null && !ScreenshotNoArt) {
 			try {
 				var image = new BitmapImage();
 				image.BeginInit();
@@ -847,6 +851,11 @@ partial class MainWindow : Window {
 	// Each page drawn into <folder>\<n>-<page>.png without showing the window (--screenshot).
 	public void SaveScreenshots(string folder) {
 		Directory.CreateDirectory(folder);
+		if (ScreenshotPath != null) {
+			building = true;
+			gamePath.Text = ScreenshotPath;
+			building = false;
+		}
 		if (storeTask != null) {
 			try {
 				if (storeTask.Wait(60000)) {
