@@ -233,6 +233,12 @@ clear the box.
 
 ## Game language (Chinese, Japanese, Korean and others)
 
+The emulator makes the game's language settings offer every language in every release: the text of 23
+(Chinese, Japanese and Korean too) and the voices of 9 (Settings > Language in the game; the voice
+language from the title screen's settings). `-Set KYTY_ALL_LANGUAGES=0` turns that off. The edit below
+is only needed with it off, or for a game version where the emulator does not find the language sets
+(the log says so: `Demon's Souls languages: ...`).
+
 The game files hold every language of the game, but the game offers only those of its release. It
 picks the release from `userDefinedParam1` in the game folder's `sce_sys\param.json`, an index into a
 table inside the game. This dump (the European release) has `2`, whose list has no Chinese, Japanese
