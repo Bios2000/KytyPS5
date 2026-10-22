@@ -276,6 +276,9 @@ There are two levels of preparation, both specific to the graphics card and driv
      overnight is a good idea. Once "ready to play" shows (about halfway), what play needs is in place
      and the game can be started; the rest follows.
    - Closing the window stops it; running it again continues where it stopped.
+   - If the graphics driver never finishes compiling a pipeline (reported on an AMD card), the precompile leaves
+     that pipeline out after 5 minutes and carries on; at the end it lists them in the logs folder
+     (`stuck-pipelines.txt`). Please update the graphics driver, and if it happens again, report that file on GitHub.
    - Coming from an older package with a precompiled `_PipelineCache\static\<title>.bin`: the precompile
      turns it into the store in a few minutes; the `.bin` is then unused and can be deleted (about 4 GB).
    - It compiles the shaders as the game uses them in play too: the package carries what was recorded
