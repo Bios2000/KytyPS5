@@ -90,8 +90,8 @@ DLSS/FSR; the Play button), **Display** (resolution, aspect ratio, fullscreen, H
 latency), **Graphics** (upscaler, render height with each height's DLSS mode, game output, DLSS model, graphics
 preset, frame generation), **Game** (console
 language, cheats), **Shaders** (precompile, optionally on the efficiency cores only so the PC stays responsive;
-export shader hints), **Advanced** (performance overlay, red-zone protection, safe GPU mode, extra command-line
-options, the launcher's language, the logs folder) and **Experimental** (options still being tried out, each with
+export shader hints), **Advanced** (performance overlay, red-zone protection, safe GPU mode, the graphics card on a
+PC with more than one, extra command-line options, the launcher's language, the logs folder) and **Experimental** (options still being tried out, each with
 the issue that collects how it goes: a 30 fps lock, direct presentation for VRR displays, keep memory resident,
 AMD Anti-Lag). It remembers the settings (`launcher-settings.json`) and needs nothing installed (.NET
 Framework 4.7.2, part of Windows 10 and 11). Windows may ask before its first start ("More info", "Run anyway"):
