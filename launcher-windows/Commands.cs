@@ -4,6 +4,8 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text;
+using System.Text.RegularExpressions;
 
 namespace KytyLauncher {
 
@@ -85,11 +87,70 @@ sealed class Commands {
 		if (S.Bool("fps30")) sets.Add("KYTY_FLIP_RATE=1");
 		// Memory kept in RAM against the MEMORY_MANAGEMENT blue screen (issue #50): a 6 GB working-set floor, no trims of its own.
 		if (S.Bool("keep_resident")) sets.AddRange(new[] { "KYTY_RESIDENT_MB=6144", "KYTY_WORKING_SET_TRIM=0" });
+		// The Advanced page's extra options: their -Set pairs join (or replace) the launcher's own.
+		var extra = ExtraOptions();
+		foreach (var option in extra) {
+			if (!IsSet(option.Key) || option.Value == null) continue;
+			foreach (var pair in Regex.Split(option.Value, ",(?=[A-Za-z_][A-Za-z0-9_]*=)")) {
+				var key = pair.Split('=')[0];
+				sets.RemoveAll(set => string.Equals(set.Split('=')[0], key, StringComparison.OrdinalIgnoreCase));
+				sets.Add(pair);
+			}
+		}
 		if (sets.Count != 0) arguments.AddRange(new[] { "-Set", string.Join(",", sets) });
 		var gamePath = S.Str("game");
 		if (gamePath.Length != 0) arguments.AddRange(new[] { "-Game", Quote(gamePath) });
+		// Their other options in place of the launcher's of the same name (run-windows.ps1 takes each once), else added.
+		foreach (var option in extra) {
+			if (IsSet(option.Key)) continue;
+			var at = arguments.FindIndex(RunArgumentsStart, a => string.Equals(a, option.Key, StringComparison.OrdinalIgnoreCase));
+			if (at >= 0) arguments.RemoveRange(at, at + 1 < arguments.Count && !arguments[at + 1].StartsWith("-") ? 2 : 1);
+			arguments.Add(option.Key);
+			if (option.Value != null) arguments.Add(option.Value.IndexOf(' ') >= 0 ? Quote(option.Value) : option.Value);
+		}
 		// The console stays for the live log; after a crash it waits for a key.
 		return PowerShell() + " " + string.Join(" ", arguments) + " & if !errorlevel! neq 0 pause";
+	}
+
+	// (Where run-windows.ps1's own arguments start: after -NoProfile -ExecutionPolicy Bypass -File <script>.)
+	const int RunArgumentsStart = 5;
+	// Characters cmd would take itself in the command line (/v:on: ! too), and quotes: an option holding one is left out.
+	static readonly char[] CmdCharacters = { '&', '|', '<', '>', '^', '!', '%', '"' };
+
+	static bool IsSet(string name) {
+		return string.Equals(name, "-Set", StringComparison.OrdinalIgnoreCase);
+	}
+
+	// The Advanced page's extra options (settings extra_args), written as on a run.cmd line: each -Name with its value (the
+	// next part when it does not start with -), "double quotes" keeping spaces in one. A value without a name is left out,
+	// as is an option holding a character cmd would take itself.
+	public List<KeyValuePair<string, string>> ExtraOptions() {
+		var parts = new List<string>();
+		var part = new StringBuilder();
+		bool quoted = false, any = false;
+		foreach (var c in S.Str("extra_args")) {
+			if (c == '"') {
+				quoted = !quoted;
+				any = true;
+			} else if (char.IsWhiteSpace(c) && !quoted) {
+				if (any) parts.Add(part.ToString());
+				part.Clear();
+				any = false;
+			} else {
+				part.Append(c);
+				any = true;
+			}
+		}
+		if (any) parts.Add(part.ToString());
+		var options = new List<KeyValuePair<string, string>>();
+		for (int i = 0; i < parts.Count; i++) {
+			var name = parts[i];
+			if (name.Length < 2 || name[0] != '-') continue;
+			var value = i + 1 < parts.Count && !parts[i + 1].StartsWith("-") ? parts[++i] : null;
+			if (name.IndexOfAny(CmdCharacters) >= 0 || (value != null && value.IndexOfAny(CmdCharacters) >= 0)) continue;
+			options.Add(new KeyValuePair<string, string>(name, value));
+		}
+		return options;
 	}
 
 	public string PlayArguments(GameInfo game = null) {
