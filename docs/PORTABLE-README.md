@@ -383,7 +383,9 @@ hurts.
 - On some PCs whose RAM runs full (mostly 16 GB with a browser open), Windows stops with a
   MEMORY_MANAGEMENT blue screen after 10 minutes to an hour of play (issue #50, being worked on). Until it is
   fixed: close other large programs while playing, keep a page file of at least 32 GB, and restart the game
-  after long sessions.
+  after long sessions. An untested option for it is on the launcher's Experimental page, "Keep memory resident"
+  (`run.cmd -Set KYTY_RESIDENT_MB=6144,KYTY_WORKING_SET_TRIM=0`; it uses about 1.5 GB more RAM): a note in issue #50
+  on whether it helps is welcome.
 - On some TVs the picture tears or stutters with VSync on. A user's fix on a 60 Hz TV with an NVIDIA
   card (issue #30): in the NVIDIA Control Panel, Manage 3D settings > Program Settings, add
   `kyty_emulator.exe` and set "Vertical sync" to On and "Vulkan/OpenGL present method" to "Prefer native".

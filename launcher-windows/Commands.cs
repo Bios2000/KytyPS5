@@ -80,6 +80,8 @@ sealed class Commands {
 		// Experiments: each frame presented as it is handed over (variable refresh rate displays, issue #37), and AMD Anti-Lag.
 		if (S.Bool("present_direct")) sets.Add("KYTY_PRESENT_DIRECT=1");
 		if (S.Bool("antilag")) sets.Add("KYTY_ANTI_LAG=1");
+		// Memory kept in RAM against the MEMORY_MANAGEMENT blue screen (issue #50): a 6 GB working-set floor, no trims of its own.
+		if (S.Bool("keep_resident")) sets.AddRange(new[] { "KYTY_RESIDENT_MB=6144", "KYTY_WORKING_SET_TRIM=0" });
 		if (sets.Count != 0) arguments.AddRange(new[] { "-Set", string.Join(",", sets) });
 		var gamePath = S.Str("game");
 		if (gamePath.Length != 0) arguments.AddRange(new[] { "-Game", Quote(gamePath) });
