@@ -210,6 +210,7 @@ shortcut):
 | `-Width 1920 -Height 1080` | The window size (default 2560×1440, shrunk when the screen is smaller) |
 | `-Game <folder>` | The game folder (or a `.zar` archive of it) |
 | `-Language 11` | The console language, as the PS5 numbers them (0 Japanese, 1 English (US), 11 Chinese (Simplified), ...; the launcher lists them) |
+| `-Set KYTY_ALL_LANGUAGES=0` | Demon's Souls' language settings offer every language the package has, in every region: the text of 23 (a US game Russian, Japanese or Korean too) and the voices of 9 (English, French, German, Italian, Spanish, Japanese, Brazilian Portuguese, Latin American Spanish; British English speaks English); this keeps only the console region's |
 | `-RenderHeight 1080` | The height the game renders its 3D at (360–2160; below 720 is meant for the 1080p output, `-HdOutput`, e.g. 540 = DLSS Performance there): lower is faster on a slow graphics card and less sharp. Without it the height follows the window, at most 1440 as on the PS5 (1080 on a 1080p screen) |
 | `-HdOutput` | The game's own 1080p output (the launcher's "Game output: 1080p"): post-processing and HUD at 1920×1080, the 3D at most 1080 high; with `-Upscaler dlss`, DLSS makes the 1080p picture from it |
 | `-Aspect 21:9` | The 3D rendered wider (`21:9` or `32:9`) for ultrawide displays; the HUD keeps its shape at the sides; in-game menus, movies and loading screens are stretched to the width (with `-AspectFit` too: movies, the title and loading screens keep their 16:9, with black bars at the sides) |
