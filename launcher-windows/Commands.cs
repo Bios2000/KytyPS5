@@ -34,6 +34,31 @@ sealed class Commands {
 
 	public bool Dlss { get { return context.FrameGenAvailable && S.Str("upscaler") == "dlss"; } }
 
+	// The game window's height in pixels: in full screen the display's, else the chosen size's (a window larger than the
+	// display is shrunk by the emulator); 0 when unknown.
+	public static int WindowHeight(string resolution, bool fullscreen, int display) {
+		if (fullscreen) return display;
+		var parts = (resolution ?? "").Split('x');
+		int height;
+		if (parts.Length < 2 || !int.TryParse(parts[1], out height)) return 0;
+		return display > 0 && height > display ? display : height;
+	}
+
+	// Game output "Automatic": the game's 1080p output for a 16:9 game window (or screen, in full screen) at most 1080
+	// lines high, which shows it pixel for pixel and saves the 4K post-processing; 4K otherwise.
+	public static bool AutoHdOutput(string resolution, bool fullscreen, string ratio, int display) {
+		var height = WindowHeight(resolution, fullscreen, display);
+		return ratio == "16:9" && height > 0 && height <= 1080;
+	}
+
+	public bool HdOutput {
+		get {
+			var output = S.Str("output");
+			return output == "1080p" ||
+			       (output == "auto" && AutoHdOutput(S.Str("resolution"), S.Bool("fullscreen"), S.Str("ratio"), context.DisplayHeight));
+		}
+	}
+
 	// direct (--play, a start from Steam or a shortcut, maybe with only a gamepad at hand): no dialogs (-Prompt) and no
 	// wait for a key after a crash.
 	public string PlayCommand(GameInfo game = null, bool direct = false) {
@@ -74,7 +99,7 @@ sealed class Commands {
 		if (!fsrOn && context.FrameGenAvailable && frameGen >= 2) arguments.AddRange(new[] { "-FrameGen", Number(frameGen - 1) });
 		if (dlss) arguments.AddRange(new[] { "-Upscaler", "dlss" });
 		// (With DLSS too: its PS5 Pro path then makes the 1080p output, the 3D at most 1080 high.)
-		if (S.Str("output") == "1080p") arguments.Add("-HdOutput");
+		if (HdOutput) arguments.Add("-HdOutput");
 		if (context.FrameGenAvailable && ((!fsrOn && frameGen >= 2) || dlss)) arguments.AddRange(new[] { "-StreamlineDir", Quote(context.Streamline) });
 		AddGpu(arguments);
 		var sets = new List<string>();

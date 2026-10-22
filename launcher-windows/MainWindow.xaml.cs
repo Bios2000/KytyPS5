@@ -63,7 +63,7 @@ partial class MainWindow : Window {
 	ComboBox resolution, ratio, render, upscaler, dlssModel, output, quality, frameGen, language, hud, uiLanguage, gpu;
 	CheckBox fullscreen, aspect, hdr, fps120, vsync, lowLatency, fsr, cheats, redzone, safeGpu, ecores, presentDirect, antiLag,
 		keepResident, fps30;
-	TextBlock renderNote, upscalerNote, frameGenNote, streamlineText, cheatState, bannerTitle, bannerLine, storeLine;
+	TextBlock renderNote, outputNote, upscalerNote, frameGenNote, streamlineText, cheatState, bannerTitle, bannerLine, storeLine;
 	Image banner;
 	Border bannerFallback;
 	StackPanel checkList;
@@ -411,18 +411,28 @@ partial class MainWindow : Window {
 		var ratios = new[] { new Choice(T("ratio.169"), "16:9"), new Choice("21:9", "21:9"), new Choice("32:9", "32:9") };
 		ratio = Combo(ratios, Math.Max(0, Array.FindIndex(ratios, c => (string)c.Value == ratioValue)));
 		resolution = new ComboBox();
-		resolution.SelectionChanged += (s, e) => Changed();
+		resolution.SelectionChanged += (s, e) => {
+			Changed();
+			WindowChanged();
+		};
 		UpdateResolutions(S.Str("resolution"));
 		ratio.SelectionChanged += (s, e) => {
 			if (building) return;
 			UpdateResolutions(Value(resolution) as string ?? S.Str("resolution"));
 			SelectRenderHeight();
 			UpdateRenderNote();
+			UpdateOutputNote();
 		};
 		fullscreen = Switch(S.Bool("fullscreen"));
 		aspect = Switch(S.Bool("aspect"), S.Bool("fullscreen"));
-		fullscreen.Checked += (s, e) => aspect.IsEnabled = true;
-		fullscreen.Unchecked += (s, e) => aspect.IsEnabled = false;
+		fullscreen.Checked += (s, e) => {
+			aspect.IsEnabled = true;
+			WindowChanged();
+		};
+		fullscreen.Unchecked += (s, e) => {
+			aspect.IsEnabled = false;
+			WindowChanged();
+		};
 		hdr = Switch(S.Bool("hdr"));
 		fps120 = Switch(S.Bool("fps120"));
 		vsync = Switch(S.Bool("vsync"));
@@ -492,11 +502,14 @@ partial class MainWindow : Window {
 			UpdateRenderNote();
 			Changed();
 		};
-		output = Combo(new[] { new Choice(T("output.4k"), "4k"), new Choice(T("output.1080"), "1080p") }, S.Str("output") == "1080p" ? 1 : 0);
+		var outputs = new[] { new Choice(T("output.auto"), "auto"), new Choice(T("output.4k"), "4k"), new Choice(T("output.1080"), "1080p") };
+		output = Combo(outputs, Math.Max(0, Array.FindIndex(outputs, c => (string)c.Value == S.Str("output"))));
+		outputNote = Desc("");
 		output.SelectionChanged += (s, e) => {
 			// (The heights below 720, and DLSS's heights and their modes, follow the output.)
 			SelectRenderHeight();
 			UpdateRenderNote();
+			UpdateOutputNote();
 		};
 		// The DLSS model (KYTY_DLSS_PRESET): the DLSS version's own choice, its transformer or its CNN model.
 		var models = new[] { new Choice(T("dlssmodel.auto"), ""), new Choice(T("dlssmodel.k"), "K"), new Choice(T("dlssmodel.e"), "E") };
@@ -516,6 +529,7 @@ partial class MainWindow : Window {
 		SelectRenderHeight();
 		UpdateRenderNote();
 		UpdateUpscalerNote();
+		UpdateOutputNote();
 
 		var qualityValue = S.Str("quality").ToLowerInvariant();
 		var qualities = new[] { new Choice(T("quality.standard"), "standard"), new Choice(T("quality.low"), "low"), new Choice(T("quality.lowest"), "lowest") };
@@ -537,7 +551,7 @@ partial class MainWindow : Window {
 			Section("graphics.resolution"),
 			Row("upscaler", upscaler, upscalerNote),
 			Row("render", render, renderNote),
-			Row("output", output, Desc(T("output.desc"))),
+			Row("output", output, outputNote),
 			Row("dlssmodel", dlssModel, Desc(T("dlssmodel.desc"))),
 			Section("graphics.detail"),
 			Row("quality", quality, Desc(T("quality.desc"))),
@@ -558,7 +572,30 @@ partial class MainWindow : Window {
 		}
 	}
 
-	bool HdOutputChosen { get { return output != null && output.SelectedIndex == 1; } }
+	// The game output shown: 1080p chosen, or Automatic for the game window chosen on the Display page (Commands.AutoHdOutput).
+	bool HdOutputChosen {
+		get {
+			var value = output == null ? S.Str("output") : Value(output) as string;
+			return value == "1080p" || (value == "auto" && Commands.AutoHdOutput(resolution == null ? S.Str("resolution") : Value(resolution) as string,
+			                                                                       fullscreen == null ? S.Bool("fullscreen") : fullscreen.IsChecked == true,
+			                                                                       Ratio(), context.DisplayHeight));
+		}
+	}
+
+	// The output's note, with what Automatic picks for this window.
+	void UpdateOutputNote() {
+		if (outputNote == null || output == null) return;
+		var auto = Value(output) as string == "auto";
+		outputNote.Text = T("output.desc") + (auto ? " " + F("output.autoNow", HdOutputChosen ? "1080p" : "4K") : "");
+	}
+
+	// The Display page's window changed: Automatic may pick the other output, and the render heights follow it.
+	void WindowChanged() {
+		if (building || output == null || render == null) return;
+		SelectRenderHeight();
+		UpdateRenderNote();
+		UpdateOutputNote();
+	}
 
 	// The DLSS mode a render height runs in: the emulator picks it from the height's share of the game's output
 	// (frame-gen.cpp: 95% DLAA, 62% Quality, 55% Balanced, 45% Performance, less Ultra Performance).
@@ -623,10 +660,10 @@ partial class MainWindow : Window {
 		if (render == null || renderNote == null) return;
 		var h = SelectedRender();
 		// (The 1080p output's 3D is at most 1080 high.)
-		var capped = output != null && output.IsEnabled && output.SelectedIndex == 1 && h > 1080;
+		var capped = HdOutputChosen && h > 1080;
 		if (capped) h = 1080;
 		// (DLSS's 4K output takes 1080 at least, or 720 for its ultra performance: a third of the output.)
-		var raised = renderForDlss && (output == null || output.SelectedIndex != 1) && h < 1080 && h != 720;
+		var raised = renderForDlss && !HdOutputChosen && h < 1080 && h != 720;
 		if (raised) h = 1080;
 		var w = (int)(Math.Floor(h * RatioAspect() / 8.0 + 0.5) * 8);
 		renderNote.Text = F(capped ? "render.capped" : raised ? "render.raised" : "render.desc", w, h);
@@ -824,7 +861,7 @@ partial class MainWindow : Window {
 		S.Set(renderForDlss ? "render_dlss" : "render", SelectedRender());
 		S.Set("ratio", Ratio());
 		S.Set("quality", Value(quality) as string ?? "standard");
-		S.Set("output", output.SelectedIndex == 1 ? "1080p" : "4k");
+		S.Set("output", Value(output) as string ?? "auto");
 		// (Kept as they were where the DLLs are missing.)
 		if (context.FrameGenAvailable) S.Set("framegen", frameGen.SelectedIndex > 0 ? frameGen.SelectedIndex + 1 : 0);
 		if (context.FrameGenAvailable) S.Set("upscaler", upscaler.SelectedIndex == 1 ? "dlss" : "");
@@ -842,7 +879,7 @@ partial class MainWindow : Window {
 	void UpdateSummary() {
 		var res = S.Str("resolution").Replace("x", "×");
 		var dlss = commands.Dlss;
-		var hdOutput = S.Str("output") == "1080p";
+		var hdOutput = commands.HdOutput;
 		var height = dlss ? S.Int("render_dlss") : S.Int("render");
 		if (hdOutput && height > 1080) height = 1080;
 		// (DLSS's 4K output takes 1080 at least, as its render height list.)
