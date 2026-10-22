@@ -2680,8 +2680,12 @@ void NotePresented(uint32_t frames) {
 	g_presented_frames.store(std::max(frames, 1u), std::memory_order_relaxed);
 }
 
+bool PresenterGeneratesHdr() {
+	return PresenterGenerates() && g_fsr_native;
+}
+
 uint32_t Generate(GraphicContext& graphics, vk::CommandBuffer command, const FrameInputs* inputs, const UpscaleImage& backbuffer,
-                  vk::Rect2D region, std::span<const UpscaleImage> outputs) {
+                  vk::Rect2D region, std::span<const UpscaleImage> outputs, bool hdr) {
 #ifdef KYTY_FRAMEGEN_NGX
 	if (!PresenterGenerates()) return 0;
 	const bool discontinuity = g_fg_discontinuity.exchange(false, std::memory_order_relaxed);
@@ -2721,6 +2725,7 @@ uint32_t Generate(GraphicContext& graphics, vk::CommandBuffer command, const Fra
 		last         = now;
 		fsr.frame_ms = frame_ms;
 		fsr.reset    = !g_fg_history || discontinuity;
+		fsr.pq       = hdr;
 		// (This frame's HUD-less image, RecordHudless: FSR takes the HUD and the menus from the game's frame.)
 		if (auto& h = g_fsr_hud; h.ready) {
 			const auto& hud = h.images[h.index];
@@ -2864,6 +2869,7 @@ uint32_t Generate(GraphicContext& graphics, vk::CommandBuffer command, const Fra
 	(void)backbuffer;
 	(void)region;
 	(void)outputs;
+	(void)hdr;
 	return 0;
 #endif
 }

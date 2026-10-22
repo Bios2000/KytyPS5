@@ -39,6 +39,7 @@ struct InterpolationInputs {
 	float                  near_plane = 0.1f, fov_y = 1.0f;
 	float                  frame_ms = 16.7f;            // the time between the game's last two frames
 	bool                   reset    = false;            // no frame before this one to interpolate from
+	bool                   pq       = false;            // the backbuffer is HDR10 (ST 2084 PQ), not sRGB
 };
 // Present thread: records into `output` (general layout, storage) the frame between the last backbuffer given and this
 // one; false when there is none to show (the first frame after a reset, or FSR failed).

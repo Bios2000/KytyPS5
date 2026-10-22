@@ -379,6 +379,10 @@ struct Interpolator {
 			Destroy(graphics);
 		if (!created && !Create(graphics, inputs)) return false;
 		reset |= inputs.reset;
+		// An HDR10 backbuffer is PQ: FSR takes it to linear light over a 1000-nit range (the guest's frames carry no
+		// mastering metadata), as sRGB is taken over 0..1.
+		const auto                 transfer  = inputs.pq ? FFX_BACKBUFFER_TRANSFER_FUNCTION_PQ : FFX_BACKBUFFER_TRANSFER_FUNCTION_SRGB;
+		const std::array<float, 2> luminance = inputs.pq ? std::array<float, 2> {0.0f, 1000.0f} : std::array<float, 2> {0.0f, 1.0f};
 		// KYTY_FRAMEGEN_MV_SIGN=1 (a test): the game's vectors as they are. They point along the motion in UV units;
 		// FSR wants render pixels towards the previous position.
 		static const float mv_sign = [] {
@@ -422,8 +426,8 @@ struct Interpolator {
 		flow.opticalFlowVector          = flow_vector;
 		flow.opticalFlowSCD             = flow_scd;
 		flow.reset                      = reset;
-		flow.backbufferTransferFunction = FFX_BACKBUFFER_TRANSFER_FUNCTION_SRGB;
-		flow.minMaxLuminance            = {0.0f, 1.0f};
+		flow.backbufferTransferFunction = transfer;
+		flow.minMaxLuminance            = {luminance[0], luminance[1]};
 		KYTY_FSR_CHECK(*this, ffxOpticalflowContextDispatch(&optical_flow, &flow));
 
 		FfxFrameInterpolationDispatchDescription dispatch {};
@@ -447,9 +451,9 @@ struct Interpolator {
 		dispatch.viewSpaceToMetersFactor    = 1.0f;
 		dispatch.frameTimeDelta             = inputs.frame_ms;
 		dispatch.reset                      = reset;
-		dispatch.backBufferTransferFunction = FFX_BACKBUFFER_TRANSFER_FUNCTION_SRGB;
-		dispatch.minMaxLuminance[0]         = 0.0f;
-		dispatch.minMaxLuminance[1]         = 1.0f;
+		dispatch.backBufferTransferFunction = transfer;
+		dispatch.minMaxLuminance[0]         = luminance[0];
+		dispatch.minMaxLuminance[1]         = luminance[1];
 		dispatch.frameID                    = frame_id;
 		dispatch.dilatedDepth               = depth_dilated;
 		dispatch.dilatedMotionVectors       = motion_dilated;
