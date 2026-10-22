@@ -118,7 +118,7 @@ static class Strings {
 		{"precompile.desc", "Compiles every shader of the game for this graphics card once: {0} on this PC, with the processor fully loaded. Closing its window stops it, and the next run continues. Needed again after a graphics driver update."},
 		{"ecores", "Precompile on the efficiency cores only (slower, the PC stays responsive)"},
 		{"ecores.none", "This processor has one kind of core."},
-		{"hints.desc", "The shaders your play recorded, without the game's code, as my-hints-<game>.hints: attached to a GitHub issue, the next packages precompile them for everyone."},
+		{"hints.desc", "The shaders your play recorded, without the game's code, as my-hints-<game>.hints.zip: attached to a GitHub issue, the next packages precompile them for everyone."},
 
 		{"advanced.title", "Advanced"}, {"advanced.stability", "Overlay and stability"}, {"advanced.launcher", "Launcher"},
 		{"hud", "Performance overlay"}, {"hud.off", "Off"}, {"hud.rate", "Frame rate"}, {"hud.detailed", "Detailed"},
@@ -236,7 +236,7 @@ static class Strings {
 		{"precompile.desc", "为本显卡把游戏的所有着色器编译一次：在这台电脑上{0}，期间 CPU 满载。关闭其窗口即可停止，下次会继续。更新显卡驱动后需要重新预编译。"},
 		{"ecores", "仅在能效核上预编译（较慢，但电脑仍保持流畅）"},
 		{"ecores.none", "此处理器只有一种核心。"},
-		{"hints.desc", "把你游玩时记录的着色器（不含游戏代码）导出为 my-hints-<game>.hints：附在 GitHub issue 里，之后的版本会为所有人预编译它们。"},
+		{"hints.desc", "把你游玩时记录的着色器（不含游戏代码）导出为 my-hints-<game>.hints.zip：附在 GitHub issue 里，之后的版本会为所有人预编译它们。"},
 
 		{"advanced.title", "高级"}, {"advanced.stability", "性能面板与稳定性"}, {"advanced.launcher", "启动器"},
 		{"hud", "性能面板"}, {"hud.off", "关闭"}, {"hud.rate", "帧率"}, {"hud.detailed", "详细"},
