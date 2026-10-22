@@ -84,11 +84,15 @@ folder (usually named `PPSA01341-app0`).
 
 ## Starting the game
 
-**Double-click `launcher.cmd`** for a small settings window: the game folder, the resolution with the
-aspect ratio, render height, upscaler and game output beside it, fullscreen (optionally keeping the aspect ratio with
-black bars), the console language and red-zone protection,
-with buttons to play, to precompile the shaders (optionally on the efficiency cores only, so the PC
-stays responsive), and to open the logs folder. It remembers the settings (`launcher-settings.json`).
+**Double-click `KytyLauncher.exe`** (or `launcher.cmd`) for the settings window, in English or Chinese. Its
+pages: **Play** (the game folder or `.zar`; checks of the game, graphics card, RAM, precompiled shaders and
+DLSS/FSR; the Play button), **Display** (resolution, aspect ratio, fullscreen, HDR, up to 120 fps, VSync, low
+latency), **Graphics** (upscaler, render height, game output, graphics preset, frame generation), **Game** (console
+language, cheats), **Shaders** (precompile, optionally on the efficiency cores only so the PC stays responsive;
+export shader hints) and **Advanced** (performance overlay, red-zone protection, safe GPU mode, the launcher's
+language, the logs folder). It remembers the settings (`launcher-settings.json`) and needs nothing installed (.NET
+Framework 4.6.2, part of Windows 10 and 11). Windows may ask before its first start ("More info", "Run anyway"):
+it is not signed. The earlier PowerShell window (`launcher.ps1`) still works.
 "Up to 120 fps" (off by default) lets the game render up to 120 frames a second instead of the
 console's 60 where the PC is fast enough: play keeps its speed, and movies, menus and loading screens
 stay at 60.
