@@ -1956,7 +1956,10 @@ void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer&
 		static vk::Format format  = vk::Format::eUndefined; // the canvas's, from its first copy
 		const vk::Extent2D size  = UiCanvasExtent();
 		uint32_t           count = 0;
-		const auto         id    = cache.FindImageAt(canvas, size.width, size.height, format, &count);
+		auto               id    = cache.FindImageAt(canvas, size.width, size.height, format, &count);
+		// (A canvas made again in another format - a game setting changed - is still the canvas: the one of its size used
+		// last, its format taken from then on.)
+		if (!id && format != vk::Format::eUndefined) id = cache.FindImageAt(canvas, size.width, size.height, vk::Format::eUndefined, &count);
 		int                now   = 3;
 		if (id) {
 			auto& ui = cache.GetImage(id);
