@@ -34,10 +34,13 @@ sealed class Commands {
 
 	public bool Dlss { get { return context.FrameGenAvailable && S.Str("upscaler") == "dlss"; } }
 
-	public string PlayCommand(GameInfo game = null) {
+	// direct (--play, a start from Steam or a shortcut, maybe with only a gamepad at hand): no dialogs (-Prompt) and no
+	// wait for a key after a crash.
+	public string PlayCommand(GameInfo game = null, bool direct = false) {
 		var size = S.Str("resolution").Split('x');
-		var arguments = new List<string> { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", Quote(Path.Combine(context.Root, "run-windows.ps1")),
-			"-Prompt", "-Follow", "-Width", size[0], "-Height", size.Length > 1 ? size[1] : "1080", "-Language", Number(S.Int("language")) };
+		var arguments = new List<string> { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", Quote(Path.Combine(context.Root, "run-windows.ps1")) };
+		if (!direct) arguments.Add("-Prompt");
+		arguments.AddRange(new[] { "-Follow", "-Width", size[0], "-Height", size.Length > 1 ? size[1] : "1080", "-Language", Number(S.Int("language")) });
 		var ratio = S.Str("ratio");
 		var wide = ratio == "21:9" || ratio == "32:9";
 		// (-AspectFit with 21:9 or 32:9 would keep movies and menus at 16:9: the launcher's wider ratios fill the screen.)
@@ -108,8 +111,8 @@ sealed class Commands {
 			arguments.Add(option.Key);
 			if (option.Value != null) arguments.Add(option.Value.IndexOf(' ') >= 0 ? Quote(option.Value) : option.Value);
 		}
-		// The console stays for the live log; after a crash it waits for a key.
-		return PowerShell() + " " + string.Join(" ", arguments) + " & if !errorlevel! neq 0 pause";
+		// The console stays for the live log; after a crash it waits for a key (not when direct).
+		return PowerShell() + " " + string.Join(" ", arguments) + (direct ? "" : " & if !errorlevel! neq 0 pause");
 	}
 
 	// (Where run-windows.ps1's own arguments start: after -NoProfile -ExecutionPolicy Bypass -File <script>.)
@@ -153,8 +156,8 @@ sealed class Commands {
 		return options;
 	}
 
-	public string PlayArguments(GameInfo game = null) {
-		return "/v:on /s /c \"" + PlayCommand(game) + "\"";
+	public string PlayArguments(GameInfo game = null, bool direct = false) {
+		return "/v:on /s /c \"" + PlayCommand(game, direct) + "\"";
 	}
 
 	public string PrecompileCommand(string option) {
@@ -170,8 +173,10 @@ sealed class Commands {
 		return "/s /c \"" + PrecompileCommand(option) + "\"";
 	}
 
-	public void Start(string cmdArguments) {
-		Process.Start(new ProcessStartInfo(Cmd(), cmdArguments) { UseShellExecute = true, WorkingDirectory = context.Root });
+	// (--play: the console minimized, so that the game's window is the one in front.)
+	public Process Start(string cmdArguments, bool minimized = false) {
+		return Process.Start(new ProcessStartInfo(Cmd(), cmdArguments) { UseShellExecute = true, WorkingDirectory = context.Root,
+			WindowStyle = minimized ? ProcessWindowStyle.Minimized : ProcessWindowStyle.Normal });
 	}
 
 	static string Quote(string text) {

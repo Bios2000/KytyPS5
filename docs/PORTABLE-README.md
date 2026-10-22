@@ -95,6 +95,10 @@ the issue that collects how it goes: a 30 fps lock, direct presentation for VRR 
 AMD Anti-Lag). It remembers the settings (`launcher-settings.json`) and needs nothing installed (.NET
 Framework 4.7.2, part of Windows 10 and 11). Windows may ask before its first start ("More info", "Run anyway"):
 it is not signed. The earlier PowerShell window (`launcher.ps1`) still works.
+`KytyLauncher.exe --play` starts the game right away with the launcher's settings, without its window: for a
+desktop shortcut, or Steam (Add a Non-Steam Game, pick `KytyLauncher.exe`, then Launch Options `--play` in its
+properties; Steam counts the game as running until it closes, so the controller layout applies). It shows no
+dialogs (after a driver update, precompile from the Shaders page) and opens the window when no game folder is set.
 "Up to 120 fps" (off by default) lets the game render up to 120 frames a second instead of the
 console's 60 where the PC is fast enough: play keeps its speed, and movies, menus and loading screens
 stay at 60.
