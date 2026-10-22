@@ -1949,12 +1949,19 @@ void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer&
 	// FSR: the interface canvas as it is at the flip (RecordHudless reads its alpha).
 	inputs.ui_valid = false;
 	if (const uint64_t canvas = g_ui_canvas.load(std::memory_order_relaxed); (g_fsr || g_fsr_native) && canvas != 0) {
-		static uint32_t reports = 0;
-		if (const auto id = cache.FindImageFromRange(canvas, 8, false); id) {
-			auto&              ui   = cache.GetImage(id);
-			const vk::Extent2D size = UiCanvasExtent();
-			if (ui.backing.image != nullptr && ui.backing.extent.width == size.width &&
-			    ui.backing.extent.height == size.height && !IsDepthFormat(ui.backing.format)) {
+		// (Another image can start at the canvas's address later on - a pass reusing its memory -: the canvas is the
+		// one of its size used last, not the first registered there. Each change of state reported, up to 32.)
+		static int        state   = 0; // 1: copied, 2: unusable, 3: not in the cache
+		static uint32_t   reports = 0;
+		static vk::Format format  = vk::Format::eUndefined; // the canvas's, from its first copy
+		const vk::Extent2D size  = UiCanvasExtent();
+		uint32_t           count = 0;
+		const auto         id    = cache.FindImageAt(canvas, size.width, size.height, format, &count);
+		int                now   = 3;
+		if (id) {
+			auto& ui = cache.GetImage(id);
+			now      = 2;
+			if (!IsDepthFormat(ui.backing.format)) {
 				// (At most 1920x1080, the 4K canvas at half its size: its alpha is a mask, read a few pixels wide; a
 				// quarter of the video memory.)
 				bool failed = false;
@@ -1963,21 +1970,24 @@ void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer&
 				if (!failed) {
 					BlitInto(vk_command, ui, inputs.ui);
 					inputs.ui_valid = true;
+					now             = 1;
+					format          = ui.backing.format;
 				}
-				if (reports++ == 0) {
-					std::printf("Frame generation: FSR HUD canvas copied (%ux%u, format %d)\n", ui.backing.extent.width,
-					            ui.backing.extent.height, static_cast<int>(ui.backing.format));
-					std::fflush(stdout);
-				}
-			} else if (reports++ < 4) {
-				std::printf("Frame generation: FSR HUD canvas image unusable (%ux%u, format %d)\n", ui.backing.extent.width,
-				            ui.backing.extent.height, static_cast<int>(ui.backing.format));
+			}
+			if (now != state && reports < 32) {
+				++reports;
+				std::printf("Frame generation: FSR HUD canvas %s (%ux%u, format %d; %u image(s) at 0x%" PRIx64 ")\n",
+				            now == 1 ? "copied" : "image unusable", ui.backing.extent.width, ui.backing.extent.height,
+				            static_cast<int>(ui.backing.format), count, canvas);
 				std::fflush(stdout);
 			}
-		} else if (reports++ < 4) {
-			std::printf("Frame generation: FSR HUD canvas at 0x%" PRIx64 " not in the texture cache\n", canvas);
+		} else if (now != state && reports < 32) {
+			++reports;
+			std::printf("Frame generation: FSR HUD canvas at 0x%" PRIx64 " not in the texture cache as %ux%u (%u image(s) there)\n",
+			            canvas, size.width, size.height, count);
 			std::fflush(stdout);
 		}
+		state = now;
 	} else if ((g_fsr || g_fsr_native) && canvas == 0) {
 		static uint32_t scenes = 0;
 		if (++scenes == 300) {

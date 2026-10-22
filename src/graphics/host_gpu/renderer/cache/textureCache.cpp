@@ -3389,6 +3389,34 @@ bool TextureCache::NewImageStartsSince(uint64_t epoch, std::vector<std::pair<uin
 	return true;
 }
 
+ImageId TextureCache::FindImageAt(uint64_t address, uint32_t width, uint32_t height, vk::Format format, uint32_t* count) {
+	if (count != nullptr) *count = 0;
+	if (!GuestRange {address, 1}.Valid()) {
+		return {};
+	}
+	std::scoped_lock lock {m_lock};
+	if (!MayStartAt(address) || !m_image_starts.contains(address)) {
+		return {};
+	}
+	ImageId  selected {};
+	uint64_t last = 0;
+	for (const auto id: FindImagesInRegion(address, 1, false)) {
+		const auto* image = m_slot_images.try_get(id);
+		if (image == nullptr || image->info.data.address != address) continue;
+		if (count != nullptr) ++*count;
+		if (image->backing.image == nullptr || image->backing.extent.width != width ||
+		    image->backing.extent.height != height ||
+		    (format != vk::Format::eUndefined && image->backing.format != format)) {
+			continue;
+		}
+		if (!selected || image->frame_accessed_last >= last) {
+			selected = id;
+			last     = image->frame_accessed_last;
+		}
+	}
+	return selected;
+}
+
 ImageId TextureCache::FindImageFromRange(uint64_t address, uint64_t size, bool ensure_valid) {
 	if (!GuestRange {address, size}.Valid()) {
 		return {};
