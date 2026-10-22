@@ -82,6 +82,7 @@ enum class Touch : uint8_t {
 	HostOverwrite,
 	Unmap,
 	Upload,
+	BufferUpload,
 	ImageGone,
 	Count
 };
@@ -97,6 +98,7 @@ inline const char* TouchName(Touch touch) {
 	                              "host write over all",
 	                              "unmap",
 	                              "image upload over it",
+	                              "buffer upload over it",
 	                              "image gone"};
 	return names[static_cast<int>(touch)];
 }
