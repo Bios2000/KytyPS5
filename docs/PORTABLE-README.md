@@ -89,8 +89,9 @@ pages: **Play** (the game folder or `.zar`; checks of the game, graphics card, R
 DLSS/FSR; the Play button), **Display** (resolution, aspect ratio, fullscreen, HDR, up to 120 fps, VSync, low
 latency), **Graphics** (upscaler, render height, game output, graphics preset, frame generation), **Game** (console
 language, cheats), **Shaders** (precompile, optionally on the efficiency cores only so the PC stays responsive;
-export shader hints) and **Advanced** (performance overlay, red-zone protection, safe GPU mode, the launcher's
-language, the logs folder). It remembers the settings (`launcher-settings.json`) and needs nothing installed (.NET
+export shader hints), **Advanced** (performance overlay, red-zone protection, safe GPU mode, the launcher's
+language, the logs folder) and **Experimental** (options still being tried out, each with the issue that collects
+how it goes: direct presentation for VRR displays, AMD Anti-Lag). It remembers the settings (`launcher-settings.json`) and needs nothing installed (.NET
 Framework 4.7.2, part of Windows 10 and 11). Windows may ask before its first start ("More info", "Run anyway"):
 it is not signed. The earlier PowerShell window (`launcher.ps1`) still works.
 "Up to 120 fps" (off by default) lets the game render up to 120 frames a second instead of the

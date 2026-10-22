@@ -49,7 +49,7 @@ $safeGpuTip = "Prevents the crashes and blue screens that come from the graphics
 $settings = [ordered]@{ game = ''; resolution = '2560x1440'; fullscreen = $false; aspect = $true; language = 1; redzone = $true; cheats = $false;
 	ecores = $false; fps120 = $false; render = 1440; ratio = '16:9'; quality = 'standard'; vsync = $false; hdr = $false; framegen = 0
 	hud = 0; streamline = ''; safegpu = $false; upscaler = ''; render_dlss = 1080; fsr = $false; output = '4k'
-	lowlatency = $false }
+	lowlatency = $false; present_direct = $false; antilag = $false }
 if (Test-Path $settingsPath) {
 	$saved = Get-Content $settingsPath -Raw | ConvertFrom-Json
 	foreach ($property in $saved.PSObject.Properties) { if ($settings.Contains($property.Name)) { $settings[$property.Name] = $property.Value } }
@@ -310,7 +310,8 @@ function Get-PlayCommand {
 	# Presents wait for the display's refresh (Vulkan FIFO): no tearing, and G-SYNC/FreeSync displays keep adapting.
 	if ($settings.vsync) { $arguments += @('-PresentMode', 'Fifo') }
 	# One frame queued instead of about two ($lowLatencyTip).
-	if ($settings.lowlatency) { $arguments += '-LowLatency' }
+	# (AMD Anti-Lag, an experiment of KytyLauncher.exe, works on top of low latency.)
+	if ($settings.lowlatency -or $settings.antilag) { $arguments += '-LowLatency' }
 	# HDR10 output when Windows HDR is on for the display; SDR otherwise.
 	if ($settings.hdr) { $arguments += '-Hdr' }
 	# The cheats file of this title, when it has one: the emulator applies the mods left enabled in it.
@@ -340,6 +341,9 @@ function Get-PlayCommand {
 	if ([int]$settings.hud -ge 1) { $sets += "KYTY_FPS_HUD=$([Math]::Min([int]$settings.hud, 2))" }
 	# Safe GPU mode: no overlapping compute dispatches ($safeGpuTip).
 	if ($settings.safegpu) { $sets += 'KYTY_COMPUTE_CHAIN=0' }
+	# KytyLauncher.exe's experiments: direct presentation (issue #37) and AMD Anti-Lag.
+	if ($settings.present_direct) { $sets += 'KYTY_PRESENT_DIRECT=1' }
+	if ($settings.antilag) { $sets += 'KYTY_ANTI_LAG=1' }
 	if ($sets.Count) { $arguments += @('-Set', ($sets -join ',')) }
 	if ($settings.game) { $arguments += @('-Game', "`"$($settings.game)`"") }
 	# The console stays for the live log; after a crash it waits for a key.
