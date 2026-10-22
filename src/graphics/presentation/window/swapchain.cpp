@@ -889,7 +889,9 @@ struct Presenter::Impl {
 			const int       refresh =
 			    display >= 0 && SDL_GetCurrentDisplayMode(display, &mode) == 0 ? mode.refresh_rate : 0;
 			min_present_interval = std::chrono::nanoseconds(refresh > 0 ? 1000000000LL / refresh : 0);
-			LOGF("Presents limited to the display refresh: %d Hz\n", refresh);
+			// (In release logs too: a refresh read wrong limits what is shown, the game's own frame rate unchanged; #129.)
+			std::printf("Presents limited to the display refresh: %d Hz\n", refresh);
+			std::fflush(stdout);
 		}
 		const auto now = std::chrono::steady_clock::now();
 		// A quarter of the interval as slack: a 60 Hz guest on a 60 Hz display flips at the same
