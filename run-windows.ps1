@@ -449,8 +449,13 @@ if ($shaders) {
 	# behind after a merge).
 	# Outdated: made from the seeds of an older precompile program, which listed fewer of the game's shaders.
 	$cacheOutdated = $status -match 'static cache outdated'
-	$cacheReady = $status -match 'static cache current' -and
-		!(Get-ChildItem "$PSScriptRoot\_PipelineCache\static\*.shard*" -ErrorAction SilentlyContinue | Where-Object Length -gt 1MB)
+	# A shard older than its store is left from an earlier run, not an unfinished one: another graphics driver's, which
+	# no merge takes (issue #126: six of them made every start offer the precompile again).
+	$unfinished = Get-ChildItem "$PSScriptRoot\_PipelineCache\static\*.shard*" -ErrorAction SilentlyContinue | Where-Object {
+		$store = Join-Path $_.DirectoryName ($_.Name -replace '\.shard.*$', '')
+		$_.Length -gt 1MB -and !((Test-Path -LiteralPath $store) -and (Get-Item -LiteralPath $store).LastWriteTime -gt $_.LastWriteTime)
+	}
+	$cacheReady = $status -match 'static cache current' -and !$unfinished
 	Write-Host "shaders:  prefetch inputs $(if ($inputsReady) { 'ready' } else { 'to be made' }), static pipeline cache $(if ($cacheReady) { 'ready' } elseif ($cacheOutdated) { 'out of date (precompile-windows.ps1 compiles what is new)' } else { 'not made (precompile-windows.ps1)' })"
 }
 
