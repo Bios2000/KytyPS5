@@ -365,12 +365,11 @@ TextureCache::TextureCache(GraphicContext& graphics, CommandScheduler& scheduler
 		g_offload_cache    = this;
 		g_offload_alive.store(true, std::memory_order_release);
 		auto& state = TextureOffload::Get();
-		// (Then the pages' protection as the page manager has it: the touch let reads through
-		// (TouchLocked), and pages other read watchers hold (the GPU wrote them) keep their no
-		// access without a change the hold's end would make.)
+		// (Every page then gets the protection the page manager has for it: the touch let reads
+		// through (TouchLocked), and a page other read watchers hold (the GPU wrote it) keeps its
+		// no access without a change the hold's end would make.)
 		state.remove.store(+[](uint64_t vaddr, uint64_t size) {
-			g_offload_cache->m_page_manager.UpdateReadWatchers<false>(vaddr, size);
-			g_offload_cache->m_page_manager.ReapplyProtection(vaddr, size);
+			g_offload_cache->m_page_manager.UpdateReadWatchers<false, true>(vaddr, size);
 		});
 		if (offload) {
 			// A restore on the render thread; from a game thread through it (as a guest readback: BufferCache::ReadMemory).
@@ -4161,9 +4160,9 @@ void TextureCache::OffloadScan(uint64_t tick) {
 		TextureOffload::Add(begin, end - begin, pieces, image.serial,
 		                    (static_cast<uint64_t>(id.generation) << 32u) | id.index, offload, [&] {
 			                    m_page_manager.UpdateReadWatchers<true>(begin, end - begin);
-			                    // (Its no access now, not with this thread's deferred ones:
-			                    // TextureOffload::Add.)
-			                    PageManager::FlushDeferredProtection();
+			                    // (Its no access now, not with this thread's other deferred
+			                    // ones: TextureOffload::Add.)
+			                    PageManager::FlushDeferredProtection(begin, end - begin);
 		                    });
 		ms[2] += since(mark);
 		if (offload) {

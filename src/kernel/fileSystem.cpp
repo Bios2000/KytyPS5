@@ -644,19 +644,27 @@ static uint32_t ReadIntoGuest(Common::File& f, void* buf, uint32_t nbytes) {
 	return total;
 }
 
-// A file write from guest memory likewise: copied out by a read that takes the fault path first.
-// The kernel reads a guest buffer without it, and a page it cannot read (the GPU wrote it; the
-// texture offload took it) made the write fail (EFAULT) instead.
+// A file write from guest memory: from the guest buffer itself. The kernel reads it without the
+// fault path, and a page it cannot read (the GPU wrote it; the texture offload took it) ends the
+// write there (EFAULT, a short count): from there a piece is copied out first, by a read that takes
+// the fault path, then the write goes on. Unmapped memory is not copied (the host memcpy would
+// crash): the write stops short there, as before.
 static void WriteFromGuest(Common::File& f, const void* buf, uint32_t nbytes,
                            uint32_t* bytes_written) {
 	constexpr uint32_t                Chunk = 4u << 20u;
 	thread_local std::vector<uint8_t> bounce;
+	const auto*                       bytes = static_cast<const uint8_t*>(buf);
 	uint32_t                          total = 0;
 	while (total < nbytes) {
-		const uint32_t want = std::min(nbytes - total, Chunk);
-		if (bounce.size() < want) bounce.resize(want);
-		std::memcpy(bounce.data(), static_cast<const uint8_t*>(buf) + total, want);
 		uint32_t done = 0;
+		f.Write(bytes + total, nbytes - total, &done);
+		total += done;
+		if (total == nbytes) break;
+		const uint32_t want = std::min(nbytes - total, Chunk);
+		if (!Memory::IsFullyMapped(reinterpret_cast<uint64_t>(bytes + total), want)) break;
+		if (bounce.size() < want) bounce.resize(want);
+		std::memcpy(bounce.data(), bytes + total, want);
+		done = 0;
 		f.Write(bounce.data(), want, &done);
 		total += done;
 		if (done < want) break;

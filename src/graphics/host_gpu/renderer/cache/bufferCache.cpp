@@ -658,6 +658,9 @@ void BufferCache::FinishGuestReadback(size_t slot, bool detach) {
 		return;
 	}
 	if (!request->copied.load(std::memory_order_acquire)) {
+		// (The game thread copying may wait for an asynchronous texture restore under its
+		// write-back, which nothing would submit while this thread waits.)
+		TextureOffload::SubmitRestores();
 		LiveCensus::Scope census(LiveCensus::ReadbackWait, reinterpret_cast<uint64_t>(__builtin_return_address(0)),
 		                         reinterpret_cast<uint64_t>(__builtin_return_address(1)));
 		LiveCensus::WaitScope waiting(LiveCensus::WaitReadback);
