@@ -1603,12 +1603,14 @@ static bool IsSignedBy(const std::wstring& path, const wchar_t* signer_name) {
 	return nvidia;
 }
 
-// (StartHeapTrimmer: the free pages of the heaps with a low-fragmentation heap - the process heap,
-// the CRT's malloc's - decommitted where possible. Windows 8.1 and later; false before.)
-static bool TrimHeap() {
+// (StartHeapTrimmer: the process heap's free pages decommitted where possible; it is the CRT's
+// malloc's, the static CRT's too. Windows 8.1 and later. 0, else GetLastError.)
+static uint32_t TrimHeap() {
 	HEAP_OPTIMIZE_RESOURCES_INFORMATION info {};
 	info.Version = HEAP_OPTIMIZE_RESOURCES_CURRENT_VERSION;
-	return HeapSetInformation(nullptr, HeapOptimizeResources, &info, sizeof(info)) != 0;
+	if (HeapSetInformation(GetProcessHeap(), HeapOptimizeResources, &info, sizeof(info)) != 0)
+		return 0;
+	return static_cast<uint32_t>(GetLastError());
 }
 
 #else
@@ -1918,13 +1920,14 @@ uint64_t AvailablePhysicalMemory() {
 	return available;
 }
 
-// (StartHeapTrimmer: glibc's free pages inside its arenas given back, not only the tops'.)
-static bool TrimHeap() {
+// (StartHeapTrimmer: glibc's free pages inside its arenas given back, not only the tops'. 0, else
+// 1: no malloc_trim.)
+static uint32_t TrimHeap() {
 #if defined(__GLIBC__)
 	malloc_trim(0);
-	return true;
+	return 0;
 #else
-	return false;
+	return 1;
 #endif
 }
 
@@ -1952,30 +1955,37 @@ bool IsAmdSigned(const std::wstring& /*path*/) {
 
 void StartHeapTrimmer() {
 	const char* value = std::getenv("KYTY_HEAP_TRIM");
-	const auto  ram   = PhysicalMemory();
-	const bool  on    = value != nullptr && value[0] != '\0'
-	                        ? value[0] != '0'
-	                        : ram != 0 && ram <= (uint64_t {20} << 30u);
-	if (!on) return;
+	if (value == nullptr || value[0] != '1') return;
 	std::thread([] {
 		SetThreadName("Kyty.HeapTrim");
-		for (uint32_t round = 0;; ++round) {
+		// The private memory after the last trim, or less since: the next trim waits for 64 MiB of
+		// growth over it (a steady heap is left alone). Private memory: Linux resident minus
+		// shared, Windows the commit charge; the working set shows the RAM.
+		uint64_t low = 0;
+		for (uint32_t round = 0;;) {
 			std::this_thread::sleep_for(std::chrono::seconds(30));
-			// (Private memory: Linux RssAnon, Windows the commit charge.)
-			const auto before = ProcessMemory().private_bytes;
-			const auto start  = std::chrono::steady_clock::now();
-			if (!TrimHeap()) {
-				std::printf("Heap trim: not supported here\n");
+			const auto before = ProcessMemory();
+			low               = std::min(low, before.private_bytes);
+			if (round != 0 && before.private_bytes < low + (uint64_t {64} << 20u)) continue;
+			const auto start = std::chrono::steady_clock::now();
+			if (const auto error = TrimHeap(); error != 0) {
+				std::printf("Heap trim: failed (error %u), stopped\n", error);
+				std::fflush(stdout);
 				return;
 			}
 			const double ms =
 			    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start)
 			        .count();
-			const auto after = ProcessMemory().private_bytes;
-			if (round < 10) {
-				std::printf("Heap trim: private memory %llu -> %llu MiB (%.1f ms)\n",
-				            static_cast<unsigned long long>(before >> 20u),
-				            static_cast<unsigned long long>(after >> 20u), ms);
+			const auto after = ProcessMemory();
+			low              = after.private_bytes;
+			if (round++ < 10) {
+				std::printf(
+				    "Heap trim: private memory %llu -> %llu MiB, working set %llu -> %llu MiB "
+				    "(%.1f ms)\n",
+				    static_cast<unsigned long long>(before.private_bytes >> 20u),
+				    static_cast<unsigned long long>(after.private_bytes >> 20u),
+				    static_cast<unsigned long long>(before.working_set >> 20u),
+				    static_cast<unsigned long long>(after.working_set >> 20u), ms);
 				std::fflush(stdout);
 			}
 		}

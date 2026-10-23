@@ -99,10 +99,10 @@ MemoryUse ProcessMemory();
 uint64_t  PhysicalMemory();
 // The physical memory the system can still give without paging (free and standby; Linux: MemAvailable). 0: unknown.
 uint64_t AvailablePhysicalMemory();
-// KYTY_HEAP_TRIM=1|0 (default: on with 20 GiB of RAM or less, as the offloads): every 30 s the
-// heap's free pages go back to the system, on a thread of its own; its first results are told.
+// KYTY_HEAP_TRIM=1 (off by default): the heap's free pages go back to the system on a thread of its
+// own, checked every 30 s, after 64 MiB of growth since the last trim; the first 10 are told.
 // Linux (glibc): malloc_trim (in Demon's Souls 130-150 MiB of its 1 GB of arenas were free chunks
-// still in RAM). Windows 8.1 and later: HeapOptimizeResources on the CRT's heap (the process's).
+// still in RAM). Windows 8.1 and later: HeapOptimizeResources on the process heap (the CRT's).
 void StartHeapTrimmer();
 // Diagnostics: the busy blocks of every heap of the process by size ("size<TAB>count<TAB>bytes" lines to `path`, the
 // heaps locked while walked: a pause of a second or so), by size and first qword (<path>.sig.tsv: SPIR-V, a vtable as

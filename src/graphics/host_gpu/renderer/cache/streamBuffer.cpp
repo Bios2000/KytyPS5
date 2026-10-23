@@ -465,6 +465,7 @@ std::pair<uint8_t*, uint64_t> StreamBuffer::Map(uint64_t size, uint64_t alignmen
 		return {nullptr, 0};
 	}
 	if (mapped_size > Size()) {
+		NoteRefusal(mapped_size);
 		return {nullptr, 0};
 	}
 
@@ -485,6 +486,7 @@ std::pair<uint8_t*, uint64_t> StreamBuffer::Map(uint64_t size, uint64_t alignmen
 	auto& pending_watches = wrap ? m_current_watches : m_previous_watches;
 	if (!WaitPendingOperations(pending_watches, invalidation_mark, aligned_offset + mapped_size,
 	                           allow_wait, wait_cursor, wait_bound)) {
+		NoteRefusal(mapped_size);
 		return {nullptr, 0};
 	}
 
@@ -527,6 +529,18 @@ uint64_t StreamBuffer::InFlight() {
 	return bytes + busy_bytes(m_current_watches, m_current_watch_cursor);
 }
 
+void StreamBuffer::NoteRefusal(uint64_t size) {
+	if (!UseStatsOn() || Usage() != MemoryUsage::Upload) return;
+	m_use.refused++;
+	m_use.refused_bytes += size;
+}
+
+void StreamBuffer::NoteBypass(uint64_t size) {
+	if (!UseStatsOn() || Usage() != MemoryUsage::Upload) return;
+	m_use.bypassed++;
+	m_use.bypassed_bytes += size;
+}
+
 void StreamBuffer::NoteUse(uint64_t size, bool wrap) {
 	using Clock    = std::chrono::steady_clock;
 	const auto now = Clock::now();
@@ -547,14 +561,17 @@ void StreamBuffer::NoteUse(uint64_t size, bool wrap) {
 	constexpr double mib = 1024.0 * 1024.0;
 	std::printf(
 	    "Upload ring %.0f MiB: %.0f MiB in %.0f s (%llu reservations, largest %.1f MiB, busiest "
-		"second %.0f MiB), "
-	    "%llu laps, most in flight %.1f MiB, %llu waits for the GPU (%.1f ms)\n",
+	    "second %.0f MiB), %llu laps, most in flight %.1f MiB, %llu waits for the GPU (%.1f ms), "
+	    "%llu refused (%.0f MiB), %llu around the ring (%.0f MiB)\n",
 	    static_cast<double>(Size()) / mib, static_cast<double>(m_use.bytes) / mib,
 	    std::chrono::duration<double>(now - m_use.since).count(),
 	    static_cast<unsigned long long>(m_use.maps), static_cast<double>(m_use.largest) / mib,
 	    static_cast<double>(m_use.busiest) / mib, static_cast<unsigned long long>(m_use.laps),
 	    static_cast<double>(m_use.in_flight) / mib, static_cast<unsigned long long>(m_use.waits),
-	    static_cast<double>(m_use.wait_us) / 1000.0);
+	    static_cast<double>(m_use.wait_us) / 1000.0, static_cast<unsigned long long>(m_use.refused),
+	    static_cast<double>(m_use.refused_bytes) / mib,
+	    static_cast<unsigned long long>(m_use.bypassed),
+	    static_cast<double>(m_use.bypassed_bytes) / mib);
 	std::fflush(stdout);
 	m_use = {};
 }
@@ -600,9 +617,11 @@ bool StreamBuffer::WaitPendingOperations(const std::vector<Watch>& watches,
 		if (busy && !allow_wait) {
 			return false;
 		}
-		const auto start = std::chrono::steady_clock::now();
+		const bool timed = busy && UseStatsOn() && Usage() == MemoryUsage::Upload;
+		const auto start =
+		    timed ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point {};
 		Scheduler().Wait(watch.tick);
-		if (busy && UseStatsOn() && Usage() == MemoryUsage::Upload) {
+		if (timed) {
 			m_use.waits++;
 			m_use.wait_us +=
 			    static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
