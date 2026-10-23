@@ -1185,8 +1185,9 @@ bool GuestRangeAccess(uint64_t vaddr, uint64_t size, bool* gpu, bool* cpu_write)
 }
 
 bool TryWriteBacking(uint64_t vaddr, const void* data, uint64_t size) {
-	// (Ranges the texture offload took there given back first: their backing view has no access,
-	// and a write-back in a fault handler - a guest readback's - cannot fault.)
+	// (Ranges the texture or file offload took there given back first, dropped ones it writes part
+	// of read back: their backing view has no access, and a write-back in a fault handler - a guest
+	// readback's - cannot fault.)
 	TextureOffload::OnHostAccess(vaddr, size, false, true);
 	return g_guest_address_space != nullptr &&
 	       g_guest_address_space->TryWriteBacking(vaddr, data, size);
@@ -1211,6 +1212,11 @@ const uint8_t* TryGetBackingPointer(uint64_t vaddr, uint64_t size) {
 
 uint64_t BackingMappingEnd(uint64_t vaddr) {
 	return g_guest_address_space != nullptr ? g_guest_address_space->BackingMappingEnd(vaddr) : 0;
+}
+
+uint8_t* SpareBackingPointer(uint64_t address) {
+	return g_guest_address_space != nullptr ? g_guest_address_space->SpareBackingPointer(address)
+	                                        : nullptr;
 }
 
 bool DiscardBacking(uint64_t address, uint64_t size) {

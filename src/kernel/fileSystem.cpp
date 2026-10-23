@@ -646,11 +646,11 @@ static uint32_t ReadIntoGuest(Common::File& f, void* buf, uint32_t nbytes) {
 
 // A file write from guest memory: from the guest buffer itself where no page of it faults on a
 // read. The kernel reads it without the fault path: a page it cannot read (the GPU wrote it; the
-// texture offload took it) ends the write there (EFAULT, a short count) on Linux, and on Windows
-// such a page is a guard page, whose guard the kernel's touch would clear unseen. Over such pages,
-// and from where a write stopped short, a piece is copied out first, by a read that takes the fault
-// path, then the write goes on. Unmapped memory is not copied (the host memcpy would crash): the
-// write stops short there, as before.
+// texture or file offload took it) ends the write there (EFAULT, a short count) on Linux, and on
+// Windows such a page is a guard page, whose guard the kernel's touch would clear unseen. Over such
+// pages, and from where a write stopped short, a piece is copied out first, by a read that takes
+// the fault path, then the write goes on. Unmapped memory is not copied (the host memcpy would
+// crash): the write stops short there, as before.
 static void WriteFromGuest(Common::File& f, const void* buf, uint32_t nbytes,
                            uint32_t* bytes_written) {
 	constexpr uint32_t                Chunk = 4u << 20u;
