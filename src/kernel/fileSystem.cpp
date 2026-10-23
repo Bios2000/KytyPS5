@@ -644,11 +644,13 @@ static uint32_t ReadIntoGuest(Common::File& f, void* buf, uint32_t nbytes) {
 	return total;
 }
 
-// A file write from guest memory: from the guest buffer itself. The kernel reads it without the
-// fault path, and a page it cannot read (the GPU wrote it; the texture offload took it) ends the
-// write there (EFAULT, a short count): from there a piece is copied out first, by a read that takes
-// the fault path, then the write goes on. Unmapped memory is not copied (the host memcpy would
-// crash): the write stops short there, as before.
+// A file write from guest memory: from the guest buffer itself where no page of it faults on a
+// read. The kernel reads it without the fault path: a page it cannot read (the GPU wrote it; the
+// texture offload took it) ends the write there (EFAULT, a short count) on Linux, and on Windows
+// such a page is a guard page, whose guard the kernel's touch would clear unseen. Over such pages,
+// and from where a write stopped short, a piece is copied out first, by a read that takes the fault
+// path, then the write goes on. Unmapped memory is not copied (the host memcpy would crash): the
+// write stops short there, as before.
 static void WriteFromGuest(Common::File& f, const void* buf, uint32_t nbytes,
                            uint32_t* bytes_written) {
 	constexpr uint32_t                Chunk = 4u << 20u;
@@ -657,9 +659,11 @@ static void WriteFromGuest(Common::File& f, const void* buf, uint32_t nbytes,
 	uint32_t                          total = 0;
 	while (total < nbytes) {
 		uint32_t done = 0;
-		f.Write(bytes + total, nbytes - total, &done);
-		total += done;
-		if (total == nbytes) break;
+		if (!Memory::ReadFaults(reinterpret_cast<uint64_t>(bytes + total), nbytes - total)) {
+			f.Write(bytes + total, nbytes - total, &done);
+			total += done;
+			if (total == nbytes) break;
+		}
 		const uint32_t want = std::min(nbytes - total, Chunk);
 		if (!Memory::IsFullyMapped(reinterpret_cast<uint64_t>(bytes + total), want)) break;
 		if (bounce.size() < want) bounce.resize(want);
