@@ -1789,6 +1789,8 @@ public:
 	                VirtualMemory::Mode               mode,
 	                GuestBackingStore::FailureReason* failure_reason = nullptr) {
 		LiveTrace::SlowOsCallScope slow(LiveTrace::OsMapBacking, vaddr, size);
+		// (Offloaded ranges of the memory mapped given back first: the new view would not fault.)
+		TextureOffload::OnBackingMapped(GetBackingBase() + backing_offset, size);
 		MaterializeParked(vaddr, size);
 		FreeSplit split;
 		{

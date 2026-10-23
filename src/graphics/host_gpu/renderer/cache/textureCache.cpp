@@ -405,8 +405,7 @@ TextureCache::TextureCache(GraphicContext& graphics, CommandScheduler& scheduler
 		if (FileOffload::Enabled()) {
 			std::printf(FileOffload::GetMode() == FileOffload::Mode::Offload
 			                ? "File offload: on (APR-read guest pages still equal to their files "
-			                  "dropped from RAM, read back from the files when touched; "
-			                  "KYTY_FILE_OFFLOAD=0 keeps them)\n"
+			                  "dropped from RAM, read back from the files when touched)\n"
 			                : "File offload probe: on (APR-read guest pages still equal to their "
 			                  "files made inaccessible; touches counted, nothing dropped)\n");
 		}
@@ -4284,6 +4283,25 @@ void TextureCache::OffloadScan(uint64_t tick) {
 #endif
 }
 
+#if KYTY_FILE_OFFLOAD_SUPPORTED
+// The offload worker's compares of a scan's file ranges (CheckFileRange) 8 MiB at a time, each
+// batch posting the next: an image's asynchronous restore posted meanwhile, which threads wait for,
+// runs between two batches, not after a whole scan's (up to 256 MiB of reads and compares).
+static void PostFileChecks(std::shared_ptr<std::vector<std::pair<uint64_t, uint64_t>>> taken,
+                           size_t first, bool drop) {
+	OffloadWorker::Post([taken = std::move(taken), first, drop]() mutable {
+		constexpr uint64_t Batch = uint64_t {8} << 20u;
+		uint64_t           bytes = 0;
+		size_t             next  = first;
+		for (; next < taken->size() && bytes < Batch; ++next) {
+			TextureOffload::CheckFileRange((*taken)[next].first, drop);
+			bytes += (*taken)[next].second;
+		}
+		if (next < taken->size()) PostFileChecks(std::move(taken), next, drop);
+	});
+}
+#endif
+
 // KYTY_FILE_OFFLOAD (file-offload.h; from OffloadScan, every 120 flips): pieces of APR reads that
 // no read replaced for 10 s are taken (the page manager's hold on the guest view, no access in the
 // backing view: each touch faults from now on) and compared with their files by the offload
@@ -4295,15 +4313,23 @@ void TextureCache::OffloadFiles() {
 		return std::chrono::seconds(
 		    value != nullptr && value[0] != '\0' ? std::strtoull(value, nullptr, 10) : 10);
 	}();
-	// (KYTY_FILE_OFFLOAD_SCAN_MB, default 256: the bytes a scan takes.)
+	// (KYTY_FILE_OFFLOAD_SCAN_MB, default 256: the bytes a scan takes;
+	// KYTY_FILE_OFFLOAD_SCAN_RANGES, default 256: the ranges, each a hold and protection changes on
+	// this thread.)
 	static const uint64_t budget = [] {
 		const char* value = std::getenv("KYTY_FILE_OFFLOAD_SCAN_MB");
 		return (value != nullptr && value[0] != '\0' ? std::strtoull(value, nullptr, 10)
 		                                             : uint64_t {256})
 		       << 20u;
 	}();
-	const bool            drop = FileOffload::GetMode() == FileOffload::Mode::Offload;
-	std::vector<uint64_t> taken;
+	static const size_t count = [] {
+		const char* value = std::getenv("KYTY_FILE_OFFLOAD_SCAN_RANGES");
+		return static_cast<size_t>(
+		    value != nullptr && value[0] != '\0' ? std::strtoull(value, nullptr, 10) : 256);
+	}();
+	const auto start = std::chrono::steady_clock::now();
+	const bool drop  = FileOffload::GetMode() == FileOffload::Mode::Offload;
+	auto       taken = std::make_shared<std::vector<std::pair<uint64_t, uint64_t>>>();
 	// (As IsRegionGpuModified, under the lock this thread holds: OffloadScan's caller.)
 	const auto gpu_written = [&](uint64_t begin, uint64_t size) {
 		if (m_buffer_cache.IsRegionGpuModified(begin, size)) return true;
@@ -4314,7 +4340,7 @@ void TextureCache::OffloadFiles() {
 		}
 		return false;
 	};
-	for (const auto& candidate: FileOffload::Take(age, budget)) {
+	for (const auto& candidate: FileOffload::Take(age, budget, count)) {
 		const uint64_t                     size = candidate.end - candidate.begin;
 		std::vector<TextureOffload::Piece> pieces;
 		uint64_t                           covered = 0;
@@ -4337,21 +4363,20 @@ void TextureCache::OffloadFiles() {
 		                                                                      size) ||
 		    gpu_written(candidate.begin, size))
 			continue;
-		TextureOffload::AddFile(candidate.begin, size, std::move(pieces), candidate.file,
-		                        candidate.offset, [&] {
-			                        m_page_manager.UpdateReadWatchers<true>(candidate.begin, size);
-			                        // (Its no access now, not with this thread's deferred ones:
-			                        // TextureOffload::Add. The worker's compare comes after it
-			                        // too.)
-			                        PageManager::FlushDeferredProtection();
-		                        });
-		taken.push_back(candidate.begin);
+		const auto hold = [&] {
+			m_page_manager.UpdateReadWatchers<true>(candidate.begin, size);
+			// (Its no access now, not with this thread's other deferred ones: TextureOffload::Add.
+			// The worker's compare comes after it too.)
+			PageManager::FlushDeferredProtection(candidate.begin, size);
+		};
+		if (TextureOffload::AddFile(candidate.begin, size, std::move(pieces), candidate.file,
+		                            candidate.offset, hold))
+			taken->emplace_back(candidate.begin, size);
 	}
-	if (!taken.empty())
-		OffloadWorker::Post([taken = std::move(taken), drop] {
-			for (const auto begin: taken)
-				TextureOffload::CheckFileRange(begin, drop);
-		});
+	const auto us = std::chrono::duration_cast<std::chrono::microseconds>(
+	    std::chrono::steady_clock::now() - start);
+	TextureOffload::NoteFileScan(taken->size(), static_cast<uint64_t>(us.count()));
+	if (!taken->empty()) PostFileChecks(std::move(taken), 0, drop);
 #endif
 }
 
@@ -4361,8 +4386,10 @@ void TextureCache::RestoreOffloaded(uint64_t vaddr, uint64_t size, uint8_t touch
 #if KYTY_TEXTURE_OFFLOAD_SUPPORTED
 	const auto touch  = static_cast<TextureOffload::Touch>(touch_value);
 #if KYTY_FILE_OFFLOAD_SUPPORTED
-	// (Dropped file bytes there: read back from their files first, on this thread.)
-	if (touch != TextureOffload::Touch::Count) TextureOffload::RestoreFiles(vaddr, size, touch);
+	// (Dropped file bytes there: read back from their files first, on this thread. Not for an image
+	// gone: nothing reads them.)
+	if (touch != TextureOffload::Touch::Count && touch != TextureOffload::Touch::ImageGone)
+		TextureOffload::RestoreFiles(vaddr, size, touch);
 #endif
 	auto       ranges = TextureOffload::BeginRestore(vaddr, size, touch, touch == TextureOffload::Touch::Count, async);
 	if (ranges.empty()) return;
