@@ -143,6 +143,7 @@ struct Range {
 using RemoveWatchers = void (*)(uint64_t vaddr, uint64_t size);
 using Restore        = void (*)(uint64_t vaddr, uint64_t size, Touch touch);
 using CanWait        = bool (*)();
+using Submit         = void (*)();
 
 struct State {
 	std::mutex                   mutex;
@@ -153,6 +154,8 @@ struct State {
 	std::atomic<RemoveWatchers>  remove {nullptr};
 	std::atomic<Restore>         restore {nullptr};
 	std::atomic<CanWait>         can_wait {nullptr};
+	// (The render thread's unsubmitted restore downloads submitted.)
+	std::atomic<Submit>          submit {nullptr};
 	std::atomic<uint64_t>        guest_lo {~uint64_t {0}}, guest_hi {0}, backing_lo {~uint64_t {0}}, backing_hi {0};
 	std::atomic<uint64_t>        restoring {0}; // ranges whose restore runs (BeginRestore to EndRestore)
 	// Statistics.
@@ -162,6 +165,8 @@ struct State {
 	uint64_t restores = 0, restore_bytes = 0, restore_us = 0, restore_us_max = 0, lost = 0, missed = 0, missed_bytes = 0;
 	uint64_t checked = 0, checked_bytes = 0, check_failed = 0;
 	uint64_t read_waits = 0, read_wait_bytes = 0; // buffer uploads that waited for an asynchronous restore
+	// Host writes that could not wait for an asynchronous restore under them.
+	uint64_t                               write_unwaited = 0;
 	std::unordered_map<uint64_t, uint64_t> rips;    // the emulator's instructions -> touches
 	std::unordered_map<uint64_t, uint64_t> callers; // their callers (one frame unwound) -> touches
 };
@@ -223,11 +228,18 @@ inline uint64_t CallerOf(const void* native_context) {
 }
 #endif
 
-// A guest range [vaddr, vaddr + size) taken, with its backing pieces and image (texture cache, render thread; the
-// caller protects, and discards, after).
-inline void Add(uint64_t vaddr, uint64_t size, std::vector<Piece> pieces, uint64_t serial, uint64_t image, bool discarded) {
+// A guest range [vaddr, vaddr + size) taken, with its backing pieces and image (texture cache,
+// render thread; the caller protects the backing view, and discards, after). `hold` puts the page
+// manager's hold on its guest view, in force when it returns, under the state's lock: another
+// thread's touch (a host write's OnHostAccess) cannot give the range back, and remove the hold,
+// before the hold is there (a no-access applied after the hold went stayed for good, and the game's
+// next read of the page faulted forever).
+template <typename Hold>
+inline void Add(uint64_t vaddr, uint64_t size, std::vector<Piece> pieces, uint64_t serial,
+                uint64_t image, bool discarded, Hold&& hold) {
 	auto&           state = Get();
 	std::lock_guard lock(state.mutex);
+	hold();
 	Range           range;
 	range.guest_end = vaddr + size;
 	range.pieces    = std::move(pieces);
@@ -340,6 +352,28 @@ inline void WaitRestores(uint64_t vaddr, uint64_t size) {
 // zeros. Image uploads wait already.
 [[nodiscard]] inline bool MustWaitBeforeRead(uint64_t vaddr, uint64_t size) {
 	return Get().restoring.load(std::memory_order_acquire) != 0 && IsRestoring(vaddr, size);
+}
+
+// A host write's wait for the restores under [vaddr, vaddr + size). An asynchronous one (an image
+// gone) lands when the GPU is done with its download: the render thread submits that first (nothing
+// else would). Deferred GPU work and the threads CanWait refuses do not wait (the restore could be
+// behind their own work): its bytes then land after the write, counted, reported once.
+inline void WaitRestoresBeforeWrite(uint64_t vaddr, uint64_t size) {
+	auto& state = Get();
+	if (!MustWaitBeforeRead(vaddr, size)) return;
+	const auto can_wait = state.can_wait.load(std::memory_order_acquire);
+	if (can_wait == nullptr || can_wait()) {
+		if (const auto submit = state.submit.load(std::memory_order_acquire); submit != nullptr)
+			submit();
+		WaitRestores(vaddr, size);
+		return;
+	}
+	std::lock_guard lock(state.mutex);
+	if (RestoringLocked(state, vaddr, size) && state.write_unwaited++ == 0)
+		std::printf("Texture offload: a host write over 0x%llx..0x%llx did not wait for the "
+		            "restore there\n",
+		            static_cast<unsigned long long>(vaddr),
+		            static_cast<unsigned long long>(vaddr + size));
 }
 
 inline void NoteReadWait(uint64_t size) {
@@ -458,7 +492,7 @@ inline void NoteCheck(uint64_t images, uint64_t bytes, uint64_t failed) {
 #if KYTY_TEXTURE_OFFLOAD_SUPPORTED
 // The exception filter's (Linux: the SIGSEGV handler's) probe handler (any thread): a touch of a
 // taken range, either view.
-inline bool OnFault(uint64_t address, uint64_t rip, const void* native_context, bool write) {
+inline bool OnFaultTaken(uint64_t address, uint64_t rip, const void* native_context, bool write) {
 	auto&      state      = Get();
 	const bool in_guest   = address >= state.guest_lo.load(std::memory_order_relaxed) && address < state.guest_hi.load(std::memory_order_relaxed);
 	const bool in_backing = address >= state.backing_lo.load(std::memory_order_relaxed) && address < state.backing_hi.load(std::memory_order_relaxed);
@@ -514,8 +548,10 @@ inline bool OnFault(uint64_t address, uint64_t rip, const void* native_context, 
 			wait_begin = it->first;
 			wait_size  = range.guest_end - it->first;
 		} else if (range.touched) {
-			// (Its protection came back before its watchers went, or this thread restores it.)
-			if (host) {
+			// (Its protection came back before its watchers went, or this thread restores it. The
+			// emulator's write through the guest view has its watchers go now, as a game thread's
+			// touch: read-only, it would fault forever.)
+			if (host && (backing_hit || !write)) {
 				if (backing_hit) {
 					for (const auto& piece: range.pieces)
 						(void)Protect(piece.backing, piece.size, Access::ReadWrite);
@@ -552,7 +588,7 @@ inline bool OnFault(uint64_t address, uint64_t rip, const void* native_context, 
 					            static_cast<unsigned long long>(rip));
 				}
 				TouchLocked(state, it, touch, host ? rip : 0, host ? CallerOf(native_context) : 0);
-				if (host) return true;
+				if (host && (backing_hit || !write)) return true;
 				now = TakePendingLocked(state);
 			}
 		}
@@ -578,6 +614,43 @@ inline bool OnFault(uint64_t address, uint64_t rip, const void* native_context, 
 	RemoveAll(state, now); // (a game thread: no lock of the emulator's held)
 	return true;
 }
+
+inline bool OnFault(uint64_t address, uint64_t rip, const void* native_context, bool write) {
+	const bool handled = OnFaultTaken(address, rip, native_context, write);
+	// (Diagnostics: one address faulting again and again on a thread is a loop; told once, with the
+	// range there.) (2 s on it: a loop through a slow path, a readback's wait for the render
+	// thread, is one too.)
+	thread_local uint64_t                              last_address = 0, repeats = 0;
+	thread_local std::chrono::steady_clock::time_point first;
+	repeats      = address == last_address ? repeats + 1 : 0;
+	last_address = address;
+	if (repeats == 0) first = std::chrono::steady_clock::now();
+	if (repeats >= 1000 && repeats % 1000 == 0 &&
+	    std::chrono::steady_clock::now() - first >= std::chrono::seconds(2) &&
+	    std::exchange(first, std::chrono::steady_clock::time_point::max()) !=
+	        std::chrono::steady_clock::time_point::max()) {
+		auto&           state = Get();
+		std::lock_guard lock(state.mutex);
+		const auto      it    = FirstOver(state, address);
+		const bool      found = it != state.guest.end() && it->first <= address;
+		char            name[32] {};
+#if defined(__linux__)
+		pthread_getname_np(pthread_self(), name, sizeof(name));
+#endif
+		std::printf("Texture offload: fault loop at 0x%llx (rip 0x%llx, %s, host %d, handled %d, "
+		            "thread %s): %s range 0x%llx..0x%llx "
+		            "touched %d discarded %d restoring %d missed %d, %zu pending\n",
+		            static_cast<unsigned long long>(address), static_cast<unsigned long long>(rip),
+		            write ? "write" : "read", IsHostCode(rip) ? 1 : 0, handled ? 1 : 0, name,
+		            found ? "in" : "no", found ? static_cast<unsigned long long>(it->first) : 0ull,
+		            found ? static_cast<unsigned long long>(it->second.guest_end) : 0ull,
+		            found && it->second.touched, found && it->second.discarded,
+		            found && it->second.restoring, found && it->second.missed,
+		            state.pending.size());
+		std::fflush(stdout);
+	}
+	return handled;
+}
 #endif
 
 // A host write (InvalidateMemory: file reads, network; `over_all`: it writes all of [vaddr, vaddr + size)) or an unmap
@@ -587,7 +660,7 @@ inline void OnHostAccess(uint64_t vaddr, uint64_t size, bool unmap, bool over_al
 	if (!Enabled() || size == 0) return;
 	auto& state = Get();
 	if (vaddr + size <= state.guest_lo.load(std::memory_order_relaxed) || vaddr >= state.guest_hi.load(std::memory_order_relaxed)) return;
-	WaitRestores(vaddr, size);
+	WaitRestoresBeforeWrite(vaddr, size);
 	std::vector<std::pair<uint64_t, uint64_t>> ranges, restore;
 	{
 		std::lock_guard lock(state.mutex);
@@ -655,7 +728,13 @@ inline void Report(bool force) {
 	auto&       state = Get();
 	static auto last  = std::chrono::steady_clock::now();
 	const auto  time  = std::chrono::steady_clock::now();
-	if (!force && time - last < std::chrono::seconds(30)) return;
+	// (KYTY_OFFLOAD_REPORT_S: seconds between reports, default 30.)
+	static const auto period = [] {
+		const char* value = std::getenv("KYTY_OFFLOAD_REPORT_S");
+		return std::chrono::seconds(
+		    value != nullptr && value[0] != '\0' ? std::strtoull(value, nullptr, 10) : 30);
+	}();
+	if (!force && time - last < period) return;
 	last = time;
 	std::lock_guard  lock(state.mutex);
 	constexpr double MiB = 1024.0 * 1024.0;
@@ -676,12 +755,14 @@ inline void Report(bool force) {
 	            static_cast<unsigned long long>(state.ages[3]));
 	if (offload) {
 		std::printf("Texture offload: checked %llu images (%.0f MiB, %llu differ); %llu restores (%.0f MiB, %.1f ms, at most %.1f ms), "
-		            "%llu lost, %llu missed (%.0f MiB); %llu buffer uploads waited for a restore (%.0f MiB)\n",
+		            "%llu lost, %llu missed (%.0f MiB); %llu buffer uploads waited for a restore (%.0f MiB), %llu host writes "
+		            "could not\n",
 		            static_cast<unsigned long long>(state.checked), state.checked_bytes / MiB,
 		            static_cast<unsigned long long>(state.check_failed), static_cast<unsigned long long>(state.restores),
 		            state.restore_bytes / MiB, state.restore_us / 1000.0, state.restore_us_max / 1000.0,
 		            static_cast<unsigned long long>(state.lost), static_cast<unsigned long long>(state.missed), state.missed_bytes / MiB,
-		            static_cast<unsigned long long>(state.read_waits), state.read_wait_bytes / MiB);
+		            static_cast<unsigned long long>(state.read_waits), state.read_wait_bytes / MiB,
+		            static_cast<unsigned long long>(state.write_unwaited));
 	}
 #if defined(_WIN32)
 	const auto exe  = reinterpret_cast<uint64_t>(GetModuleHandleW(nullptr));

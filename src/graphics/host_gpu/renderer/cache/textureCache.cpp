@@ -365,7 +365,13 @@ TextureCache::TextureCache(GraphicContext& graphics, CommandScheduler& scheduler
 		g_offload_cache    = this;
 		g_offload_alive.store(true, std::memory_order_release);
 		auto& state = TextureOffload::Get();
-		state.remove.store(+[](uint64_t vaddr, uint64_t size) { g_offload_cache->m_page_manager.UpdateReadWatchers<false>(vaddr, size); });
+		// (Then the pages' protection as the page manager has it: the touch let reads through
+		// (TouchLocked), and pages other read watchers hold (the GPU wrote them) keep their no
+		// access without a change the hold's end would make.)
+		state.remove.store(+[](uint64_t vaddr, uint64_t size) {
+			g_offload_cache->m_page_manager.UpdateReadWatchers<false>(vaddr, size);
+			g_offload_cache->m_page_manager.ReapplyProtection(vaddr, size);
+		});
 		if (offload) {
 			// A restore on the render thread; from a game thread through it (as a guest readback: BufferCache::ReadMemory).
 			state.restore.store(+[](uint64_t vaddr, uint64_t size, TextureOffload::Touch touch) {
@@ -383,6 +389,17 @@ TextureCache::TextureCache(GraphicContext& graphics, CommandScheduler& scheduler
 			state.can_wait.store(+[] {
 				if (AsyncUpload::t_worker || CommandScheduler::InDeferredOperation()) return false;
 				return GuestGpu::IsGpuThread() || LibKernel::PthreadSelfOrNull() != nullptr;
+			});
+			// (A host write's wait for the asynchronous restores under it, on the render thread:
+			// their downloads go first.)
+			state.submit.store(+[] {
+				auto* cache = g_offload_cache;
+				if (cache == nullptr || !g_offload_alive.load(std::memory_order_acquire) ||
+				    !GuestGpu::IsGpuThread() || CommandScheduler::InDeferredOperation() ||
+				    !cache->m_offload_unsubmitted)
+					return;
+				cache->m_offload_unsubmitted = false;
+				cache->m_scheduler.Flush();
 			});
 		}
 		Common::HostException::SetProbeHandler(TextureOffload::OnFault);
@@ -4140,10 +4157,14 @@ void TextureCache::OffloadScan(uint64_t tick) {
 		auto mark = Clock::now();
 		if (offload) AsyncUpload::DrainRange(begin, end - begin);
 		ms[1] += since(mark);
-		TextureOffload::Add(begin, end - begin, pieces, image.serial, (static_cast<uint64_t>(id.generation) << 32u) | id.index,
-		                    offload);
 		mark = Clock::now();
-		m_page_manager.UpdateReadWatchers<true>(begin, end - begin);
+		TextureOffload::Add(begin, end - begin, pieces, image.serial,
+		                    (static_cast<uint64_t>(id.generation) << 32u) | id.index, offload, [&] {
+			                    m_page_manager.UpdateReadWatchers<true>(begin, end - begin);
+			                    // (Its no access now, not with this thread's deferred ones:
+			                    // TextureOffload::Add.)
+			                    PageManager::FlushDeferredProtection();
+		                    });
 		ms[2] += since(mark);
 		if (offload) {
 			discards.emplace_back(begin, end - begin);

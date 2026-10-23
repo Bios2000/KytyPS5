@@ -644,6 +644,26 @@ static uint32_t ReadIntoGuest(Common::File& f, void* buf, uint32_t nbytes) {
 	return total;
 }
 
+// A file write from guest memory likewise: copied out by a read that takes the fault path first.
+// The kernel reads a guest buffer without it, and a page it cannot read (the GPU wrote it; the
+// texture offload took it) made the write fail (EFAULT) instead.
+static void WriteFromGuest(Common::File& f, const void* buf, uint32_t nbytes,
+                           uint32_t* bytes_written) {
+	constexpr uint32_t                Chunk = 4u << 20u;
+	thread_local std::vector<uint8_t> bounce;
+	uint32_t                          total = 0;
+	while (total < nbytes) {
+		const uint32_t want = std::min(nbytes - total, Chunk);
+		if (bounce.size() < want) bounce.resize(want);
+		std::memcpy(bounce.data(), static_cast<const uint8_t*>(buf) + total, want);
+		uint32_t done = 0;
+		f.Write(bounce.data(), want, &done);
+		total += done;
+		if (done < want) break;
+	}
+	*bytes_written = total;
+}
+
 int64_t KYTY_SYSV_ABI KernelRead(int d, void* buf, size_t nbytes) {
 	PRINT_NAME();
 
@@ -753,7 +773,7 @@ int64_t KYTY_SYSV_ABI KernelWrite(int d, const void* buf, size_t nbytes) {
 	if (file->append) {
 		file->f.Seek(file->f.Size());
 	}
-	file->f.Write(buf, static_cast<uint32_t>(nbytes), &bytes_written);
+	WriteFromGuest(file->f, buf, static_cast<uint32_t>(nbytes), &bytes_written);
 	if (bytes_written < nbytes && !is_invalid) ReportWriteFailure("write", file->real_name, bytes_written, nbytes);
 	if (file->sync_writes) {
 		file->f.Flush();
@@ -862,7 +882,7 @@ int64_t KYTY_SYSV_ABI KernelPwrite(int d, const void* buf, size_t nbytes, int64_
 	auto     pos           = file->f.Tell();
 	uint32_t bytes_written = 0;
 	file->f.Seek(file->append ? file->f.Size() : static_cast<uint64_t>(offset));
-	file->f.Write(buf, static_cast<uint32_t>(nbytes), &bytes_written);
+	WriteFromGuest(file->f, buf, static_cast<uint32_t>(nbytes), &bytes_written);
 	if (bytes_written < nbytes && !is_invalid) ReportWriteFailure("write", file->real_name, bytes_written, nbytes);
 	if (file->sync_writes) {
 		file->f.Flush();
