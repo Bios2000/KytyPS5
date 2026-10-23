@@ -232,6 +232,31 @@ inline void CountBlocksLocked(uint64_t vaddr, uint64_t end, int delta) {
 	return false;
 }
 
+// The pieces in `backing` per MiB of the backing view, read without the lock: OnBackingMapped's
+// check that a guest map may cover a taken range's pieces (most guest maps fall between backing_lo
+// and backing_hi once a few images are taken). Indexed by the MiB modulo BlockLimit, wherever the
+// view lies: a store smaller than BlockLimit shares no counter within itself, and a shared one
+// would only take the lock in vain.
+inline std::atomic<uint16_t> g_backing_blocks[BlockLimit >> BlockBits];
+
+// (state.mutex held) A piece in or out of `backing`: its blocks counted (+1) or not (-1).
+inline void CountBackingLocked(uint64_t backing, uint64_t size, int delta) {
+	if (size == 0) return;
+	constexpr uint64_t Mask = (BlockLimit >> BlockBits) - 1;
+	for (uint64_t block = backing >> BlockBits; block <= (backing + size - 1) >> BlockBits; ++block)
+		g_backing_blocks[block & Mask].fetch_add(static_cast<uint16_t>(delta),
+		                                         std::memory_order_relaxed);
+}
+
+// Whether a piece in `backing` may overlap [backing, backing + size), without the lock.
+[[nodiscard]] inline bool MayOverlapBacking(uint64_t backing, uint64_t size) {
+	if (size > BlockLimit) return true;
+	constexpr uint64_t Mask = (BlockLimit >> BlockBits) - 1;
+	for (uint64_t block = backing >> BlockBits; block <= (backing + size - 1) >> BlockBits; ++block)
+		if (g_backing_blocks[block & Mask].load(std::memory_order_relaxed) != 0) return true;
+	return false;
+}
+
 enum class Access { None, Read, ReadWrite };
 
 #if defined(_WIN32)
@@ -305,6 +330,7 @@ inline void Add(uint64_t vaddr, uint64_t size, std::vector<Piece> pieces, uint64
 	range.discarded = discarded;
 	for (const auto& piece: range.pieces) {
 		state.backing[piece.backing] = vaddr;
+		CountBackingLocked(piece.backing, piece.size, 1);
 		if (piece.backing < state.backing_lo.load(std::memory_order_relaxed)) state.backing_lo.store(piece.backing, std::memory_order_relaxed);
 		if (piece.backing + piece.size > state.backing_hi.load(std::memory_order_relaxed))
 			state.backing_hi.store(piece.backing + piece.size, std::memory_order_relaxed);
@@ -346,6 +372,7 @@ inline bool AddFile(uint64_t vaddr, uint64_t size, std::vector<Piece> pieces, ui
 	range.file_offset = file_offset;
 	for (const auto& piece: range.pieces) {
 		state.backing[piece.backing] = vaddr;
+		CountBackingLocked(piece.backing, piece.size, 1);
 		if (piece.backing < state.backing_lo.load(std::memory_order_relaxed))
 			state.backing_lo.store(piece.backing, std::memory_order_relaxed);
 		if (piece.backing + piece.size > state.backing_hi.load(std::memory_order_relaxed))
@@ -562,8 +589,10 @@ inline void TouchLocked(State& state, std::map<uint64_t, Range>::iterator it, To
 
 // (state.mutex held) A range out of the maps.
 inline void EraseLocked(State& state, std::map<uint64_t, Range>::iterator range) {
-	for (const auto& piece: range->second.pieces)
+	for (const auto& piece: range->second.pieces) {
 		state.backing.erase(piece.backing);
+		CountBackingLocked(piece.backing, piece.size, -1);
+	}
 	CountBlocksLocked(range->first, range->second.guest_end, -1);
 	state.guest.erase(range);
 }
@@ -1102,7 +1131,8 @@ inline void OnBackingMapped(uint64_t backing, uint64_t size) {
 	if (!AnyEnabled() || size == 0) return;
 	auto& state = Get();
 	if (backing + size <= state.backing_lo.load(std::memory_order_relaxed) ||
-	    backing >= state.backing_hi.load(std::memory_order_relaxed))
+	    backing >= state.backing_hi.load(std::memory_order_relaxed) ||
+	    !MayOverlapBacking(backing, size))
 		return;
 	std::vector<std::pair<uint64_t, uint64_t>> ranges;
 	std::vector<uint64_t>                      files;
