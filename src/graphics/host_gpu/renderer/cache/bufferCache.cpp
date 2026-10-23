@@ -11,6 +11,7 @@
 #include "readback-queue.h"
 #include "fresh-memory.h"
 #include "texture-offload.h"
+#include "local-platform.h"
 #ifdef KYTY_LOCAL_VULKAN_RECORDING
 #include "vulkan-recording.h"
 #endif
@@ -91,6 +92,18 @@ struct NativeBufferDownloadScope {
 	NativeBufferDownloadScope() { ++native_buffer_download_depth; }
 	~NativeBufferDownloadScope() { --native_buffer_download_depth; }
 };
+
+// KYTY_STAGING_MB: the staging ring's size in MiB, 16 or more (pinned system memory; default 512,
+// 256 with 20 GiB of RAM or less, as the offloads). Uploads past it take a temporary buffer or go a
+// ring's size at a time: in Demon's Souls only a level's load fills more than 256 MiB (6-9 waits
+// for the GPU, 51-69 ms in all, against 2 and 49 ms with 512).
+uint64_t StagingRingSize() {
+	const char* value = std::getenv("KYTY_STAGING_MB");
+	const auto  mib = value != nullptr && value[0] != '\0' ? std::strtoull(value, nullptr, 10) : 0;
+	if (mib >= 16) return mib * MiB;
+	const auto ram = LocalPlatform::PhysicalMemory();
+	return (ram != 0 && ram <= (uint64_t {20} << 30u) ? 256 : 512) * MiB;
+}
 
 } // namespace
 
@@ -1333,7 +1346,7 @@ BufferCache::BufferCache(GraphicContext& graphics, CommandScheduler& scheduler,
       m_gds_buffer(graphics, scheduler, MemoryUsage::Stream, 0, AllFlags, GdsBufferSize),
       m_lod_stats_buffer(graphics, scheduler, MemoryUsage::Stream, 0, AllFlags, 256 * 16),
       m_memory_tracker(page_manager),
-      m_staging_buffer(graphics, scheduler, MemoryUsage::Upload, 512 * MiB,
+      m_staging_buffer(graphics, scheduler, MemoryUsage::Upload, StagingRingSize(),
                        AllFlags | vk::BufferUsageFlagBits::eShaderDeviceAddress),
       m_stream_buffer(graphics, scheduler, MemoryUsage::Stream, 64 * MiB),
       m_host_shader_upload(graphics, scheduler, MemoryUsage::Upload, 64 * MiB),

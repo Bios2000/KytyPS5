@@ -99,10 +99,15 @@ MemoryUse ProcessMemory();
 uint64_t  PhysicalMemory();
 // The physical memory the system can still give without paging (free and standby; Linux: MemAvailable). 0: unknown.
 uint64_t AvailablePhysicalMemory();
+// KYTY_HEAP_TRIM=1|0 (default: on with 20 GiB of RAM or less, as the offloads): every 30 s the
+// heap's free pages go back to the system, on a thread of its own; its first results are told.
+// Linux (glibc): malloc_trim (in Demon's Souls 130-150 MiB of its 1 GB of arenas were free chunks
+// still in RAM). Windows 8.1 and later: HeapOptimizeResources on the CRT's heap (the process's).
+void StartHeapTrimmer();
 // Diagnostics: the busy blocks of every heap of the process by size ("size<TAB>count<TAB>bytes" lines to `path`, the
 // heaps locked while walked: a pause of a second or so), by size and first qword (<path>.sig.tsv: SPIR-V, a vtable as
-// module+offset, zero, data) and the committed private allocations (<path>.vm.tsv, the heaps' marked); false where
-// the host cannot list them.
+// module+offset, zero, data) and the committed private allocations (<path>.vm.tsv, the heaps' marked); Linux (glibc):
+// the arenas' totals and malloc_info's XML instead. false where the host cannot list them.
 bool WriteHeapHistogram(const char* path);
 // Diagnostics: the stacks of live heap blocks of the given sizes ("2848,5151,16-256"): StartAllocTrace hooks the process
 // heap calls of every loaded module (their imports of RtlAllocateHeap/RtlFreeHeap/RtlReAllocateHeap) and records each

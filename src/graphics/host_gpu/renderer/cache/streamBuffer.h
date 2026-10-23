@@ -6,6 +6,7 @@
 #include "graphics/host_gpu/vulkanCommon.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -145,6 +146,18 @@ private:
 	                                                uint64_t requested_upper_bound, bool allow_wait,
 	                                                size_t& wait_cursor, uint64_t& wait_bound);
 
+	// KYTY_STAGING_STATS=1 (diagnostics): an upload ring's use, printed each 10 s (Map): the bytes
+	// through it, its laps, the waits for the GPU, and the most in flight (reserved and not yet
+	// read by the GPU: the size it needs).
+	struct UseStats {
+		uint64_t bytes = 0, maps = 0, laps = 0, waits = 0, wait_us = 0, largest = 0;
+		uint64_t second_bytes = 0, busiest = 0, in_flight = 0;
+		std::chrono::steady_clock::time_point since {}, second {};
+	};
+	[[nodiscard]] uint64_t InFlight();
+	void                   NoteUse(uint64_t size, bool wrap);
+
+	UseStats              m_use;
 	uint64_t              m_offset      = 0;
 	uint64_t              m_mapped_size = 0;
 	std::vector<Watch>    m_current_watches;

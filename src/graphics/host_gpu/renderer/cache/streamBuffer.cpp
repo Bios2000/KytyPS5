@@ -7,7 +7,9 @@
 #include "device-fault.h"
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
@@ -28,6 +30,14 @@ extern "C" {
 namespace Libs::Graphics {
 
 namespace {
+
+bool UseStatsOn() {
+	static const bool on = [] {
+		const char* value = std::getenv("KYTY_STAGING_STATS");
+		return value != nullptr && value[0] == '1';
+	}();
+	return on;
+}
 
 class BufferReclaimer {
 public:
@@ -487,7 +497,66 @@ std::pair<uint8_t*, uint64_t> StreamBuffer::Map(uint64_t size, uint64_t alignmen
 	m_wait_bound  = wait_bound;
 	m_offset      = aligned_offset;
 	m_mapped_size = mapped_size;
+	if (UseStatsOn() && Usage() == MemoryUsage::Upload) NoteUse(mapped_size, wrap);
 	return {Mapped().data() + m_offset, m_offset};
+}
+
+// The bytes the GPU may still read: the reservations of ticks not done, a suffix of the last lap's
+// watches (the earlier ones are done: ticks rise) and of this lap's, and the one just made.
+uint64_t StreamBuffer::InFlight() {
+	const auto first_busy = [this](const std::vector<Watch>& watches, size_t count) {
+		size_t low = 0, high = count;
+		while (low < high) {
+			const size_t middle = (low + high) / 2;
+			if (Scheduler().IsFree(watches[middle].tick)) {
+				low = middle + 1;
+			} else {
+				high = middle;
+			}
+		}
+		return low;
+	};
+	const auto busy_bytes = [&](const std::vector<Watch>& watches, size_t count) -> uint64_t {
+		const size_t first = first_busy(watches, count);
+		if (first >= count) return 0;
+		return watches[count - 1].upper_bound - (first == 0 ? 0 : watches[first - 1].upper_bound);
+	};
+	uint64_t bytes = m_mapped_size;
+	if (m_invalidation_mark.has_value())
+		bytes += busy_bytes(m_previous_watches, *m_invalidation_mark);
+	return bytes + busy_bytes(m_current_watches, m_current_watch_cursor);
+}
+
+void StreamBuffer::NoteUse(uint64_t size, bool wrap) {
+	using Clock    = std::chrono::steady_clock;
+	const auto now = Clock::now();
+	if (m_use.maps == 0) m_use.since = m_use.second = now;
+	m_use.maps++;
+	m_use.bytes += size;
+	m_use.laps += wrap ? 1 : 0;
+	m_use.largest   = std::max(m_use.largest, size);
+	m_use.in_flight = std::max(m_use.in_flight, InFlight());
+	if (now - m_use.second >= std::chrono::seconds(1)) {
+		m_use.busiest      = std::max(m_use.busiest, m_use.second_bytes);
+		m_use.second_bytes = 0;
+		m_use.second       = now;
+	}
+	m_use.second_bytes += size;
+	if (now - m_use.since < std::chrono::seconds(10)) return;
+	m_use.busiest        = std::max(m_use.busiest, m_use.second_bytes);
+	constexpr double mib = 1024.0 * 1024.0;
+	std::printf(
+	    "Upload ring %.0f MiB: %.0f MiB in %.0f s (%llu reservations, largest %.1f MiB, busiest "
+		"second %.0f MiB), "
+	    "%llu laps, most in flight %.1f MiB, %llu waits for the GPU (%.1f ms)\n",
+	    static_cast<double>(Size()) / mib, static_cast<double>(m_use.bytes) / mib,
+	    std::chrono::duration<double>(now - m_use.since).count(),
+	    static_cast<unsigned long long>(m_use.maps), static_cast<double>(m_use.largest) / mib,
+	    static_cast<double>(m_use.busiest) / mib, static_cast<unsigned long long>(m_use.laps),
+	    static_cast<double>(m_use.in_flight) / mib, static_cast<unsigned long long>(m_use.waits),
+	    static_cast<double>(m_use.wait_us) / 1000.0);
+	std::fflush(stdout);
+	m_use = {};
 }
 
 void StreamBuffer::Commit() {
@@ -527,10 +596,19 @@ bool StreamBuffer::WaitPendingOperations(const std::vector<Watch>& watches,
 	}
 	while (requested_upper_bound > wait_bound && wait_cursor < *invalidation_mark) {
 		const auto& watch = watches[wait_cursor];
-		if (!Scheduler().IsFree(watch.tick) && !allow_wait) {
+		const bool  busy  = !Scheduler().IsFree(watch.tick);
+		if (busy && !allow_wait) {
 			return false;
 		}
+		const auto start = std::chrono::steady_clock::now();
 		Scheduler().Wait(watch.tick);
+		if (busy && UseStatsOn() && Usage() == MemoryUsage::Upload) {
+			m_use.waits++;
+			m_use.wait_us +=
+			    static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+			                              std::chrono::steady_clock::now() - start)
+				                          .count());
+		}
 		if (Usage() == MemoryUsage::Download) {
 			Scheduler().WaitPriorityOperations(watch.tick);
 		}

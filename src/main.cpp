@@ -356,6 +356,7 @@ int main(int argc, char* argv[]) {
 	std::atexit(LocalPlatform::DrainStdout);
 	std::at_quick_exit(LocalPlatform::DrainStdout);
 #endif
+	LocalPlatform::StartHeapTrimmer();
 	VirtualMemory::Init();
 	InitializeThreads();
 
