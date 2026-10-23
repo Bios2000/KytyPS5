@@ -293,6 +293,27 @@ public:
 #endif
 	}
 
+	// Linux, the file offload: the byte at `address` of the backing view in a second read-write
+	// view of the store (mapped on first use), which the offload's protections of the backing view
+	// leave alone. Null elsewhere.
+	uint8_t* SparePointer(uint64_t address) {
+#if KYTY_PLATFORM == KYTY_PLATFORM_LINUX && !defined(__APPLE__)
+		std::call_once(m_spare_once, [this] {
+			if (!IsAvailable()) return;
+			void* view =
+			    mmap(nullptr, m_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_NORESERVE, m_fd, 0);
+			if (view != MAP_FAILED) m_spare = static_cast<uint8_t*>(view);
+		});
+		const auto base = reinterpret_cast<uint64_t>(m_backing_base);
+		return m_spare != nullptr && address >= base && address - base < m_size
+		           ? m_spare + (address - base)
+				   : nullptr;
+#else
+		(void)address;
+		return nullptr;
+#endif
+	}
+
 	bool ZeroRange(uint64_t backing_offset, uint64_t size) {
 		GuestBackingMutation mutation;
 		if (!IsAvailable() || !RangeOk(backing_offset, size)) {
@@ -1465,7 +1486,9 @@ private:
 		return ptr != MAP_FAILED && ptr == vaddr;
 	}
 
-	int m_fd = -1;
+	int            m_fd    = -1;
+	uint8_t*       m_spare = nullptr; // (SparePointer)
+	std::once_flag m_spare_once;
 #endif
 
 	uint8_t*                     m_backing_base = nullptr;
@@ -1678,6 +1701,7 @@ public:
 
 	const uint8_t* BackingPointer(uint64_t vaddr, uint64_t size) { return m_backing->BackingPointer(vaddr, size); }
 	uint64_t       BackingMappingEnd(uint64_t vaddr) { return m_backing->MappingEndOf(vaddr); }
+	uint8_t* SpareBackingPointer(uint64_t address) { return m_backing->SparePointer(address); }
 	bool           DiscardBacking(uint64_t address, uint64_t size) {
 		return m_backing->DiscardPages(address, size);
 	}

@@ -215,7 +215,7 @@ void GpuResourceManager::UnmapMemory(uint64_t vaddr, uint64_t size, bool releasi
 		     "addr=0x%016" PRIx64 " size=0x%016" PRIx64 "\n",
 		     vaddr, size);
 	}
-	TextureOffload::OnHostAccess(vaddr, size, true, false);
+	TextureOffload::OnHostAccess(vaddr, size, true, releasing); // (released: its bytes go with it)
 	const auto unmap = [this, vaddr, size, releasing] {
 		// Released memory loses its host protection with the mapping: the watchers removed
 		// below need not restore it page run by page run first.
