@@ -50,7 +50,26 @@ public:
 	// Returns once every pushed buffer is destroyed (before the allocator goes away).
 	void Flush() {
 		std::unique_lock lock(m_mutex);
+		m_flushing++;
+		m_wake.notify_one();
 		m_idle.wait(lock, [this] { return m_pending.empty() && !m_busy; });
+		m_flushing--;
+	}
+	// No buffer destroyed from Pause (once the batch being destroyed is) until Resume: a
+	// defragmentation pass's (BufferCache::Defragment), whose moves' allocations VMA must not see
+	// freed before the pass ends. (A buffer destroyed before the pass began, its allocation still
+	// waiting here, was among them: freed meanwhile, reading it crashed, vmaGetAllocationInfo.)
+	void Pause() {
+		std::unique_lock lock(m_mutex);
+		m_paused++;
+		m_idle.wait(lock, [this] { return !m_busy; });
+	}
+	void Resume() {
+		{
+			std::lock_guard lock(m_mutex);
+			m_paused--;
+		}
+		m_wake.notify_one();
 	}
 
 private:
@@ -63,7 +82,9 @@ private:
 		std::vector<Item> batch;
 		std::unique_lock  lock(m_mutex);
 		for (;;) {
-			m_wake.wait(lock, [this] { return m_stop || !m_pending.empty(); });
+			m_wake.wait(lock, [this] {
+				return m_stop || (!m_pending.empty() && (m_paused == 0 || m_flushing != 0));
+			});
 			if (m_pending.empty() && m_stop) return;
 			batch.swap(m_pending);
 			m_busy = true;
@@ -79,6 +100,7 @@ private:
 	std::condition_variable m_wake, m_idle;
 	std::vector<Item>       m_pending;
 	bool                    m_busy = false, m_stop = false;
+	uint32_t                m_paused = 0, m_flushing = 0;
 	std::thread             m_thread;
 };
 
@@ -291,6 +313,14 @@ Buffer::~Buffer() {
 
 void FlushBufferReclaimer() {
 	Reclaimer().Flush();
+}
+
+void PauseBufferReclaimer(bool pause) {
+	if (pause) {
+		Reclaimer().Pause();
+	} else {
+		Reclaimer().Resume();
+	}
 }
 
 vk::DeviceAddress Buffer::BufferDeviceAddress() const noexcept {

@@ -94,6 +94,8 @@ struct NativeBufferDownloadScope {
 
 } // namespace
 
+void PauseBufferReclaimer(bool pause); // streamBuffer.cpp (KYTY_BUFFER_RECLAIM)
+
 void BufferCache::WriteDataBuffer(Buffer& buffer, uint64_t address, const void* source,
                                   uint64_t size) {
 	auto* bytes = static_cast<const uint8_t*>(source);
@@ -2861,6 +2863,7 @@ void BufferCache::Defragment(uint64_t tick) {
 	if (m_defrag_ending.valid()) {
 		if (m_defrag_ending.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
 		const auto result = m_defrag_ending.get();
+		PauseBufferReclaimer(false); // (the pass's end: Defragment's pause below)
 		// (Moved allocations of new buffers destroyed while the pass ended: EraseSlot.)
 		for (auto* allocation: m_defrag_free_later) vmaFreeMemory(allocator, allocation);
 		m_defrag_free_later.clear();
@@ -2915,7 +2918,10 @@ void BufferCache::Defragment(uint64_t tick) {
 	// (On the command buffer being recorded: MoveSpilledBufferBack.)
 	if (!m_scheduler.Active() || m_scheduler.Current().IsInvalid()) return;
 	timed.on = true;
+	// (The reclaimer frees no allocation while the pass is open: the pass may move one it holds.)
+	PauseBufferReclaimer(true);
 	if (vmaBeginDefragmentationPass(allocator, m_defrag, &m_defrag_pass) != VK_INCOMPLETE) {
+		PauseBufferReclaimer(false);
 		EndDefragmentation();
 		return;
 	}
