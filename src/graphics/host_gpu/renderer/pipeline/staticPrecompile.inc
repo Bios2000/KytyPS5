@@ -1226,12 +1226,19 @@ bool PipelineCache::StaticCacheCurrent(GraphicContext& graphics, const std::file
 		if (error) return false;
 		const auto seeded = std::filesystem::last_write_time(seeds, error);
 		if (error || written < seeded) return false;
-		// Older than the release's hints too (run from the package's folder): a package with new hints, or a precompile
-		// that compiled the seeds alone (v20261016 on a PC without recorded play, issue #28), compiles what they add.
-		const auto hints  = std::filesystem::path("tools") / "local" / "static-precompile" /
-		                    ("hints-" + PipelineCacheGameId() + ".hints");
-		const auto hinted = std::filesystem::last_write_time(hints, error);
-		if (!error && written < hinted) return false;
+		// Made before the release's hints too: a package with new hints, or a precompile that compiled the seeds alone
+		// (v20261016 on a PC without recorded play, issue #28), compiles what they add. By the hints' hash the last
+		// precompile recorded: a zip holds its files' local times without a zone, so a package made in UTC and unpacked
+		// west of it had hints from hours ahead, and a store precompiled in between stayed out of date (issue #143).
+		// From an older precompile: by the files' times.
+		const auto hinted = std::filesystem::last_write_time(StaticHintsPath(), error);
+		if (!error) {
+			if (const auto recorded = ReadStaticHintsStamp()) {
+				if (*recorded != StaticHintsHash()) return false;
+			} else if (written < hinted) {
+				return false;
+			}
+		}
 		// Made without a translation feature of this emulator's for this GPU, and no precompile with it tried since: one
 		// makes the pipelines it changes.
 		namespace Translate = ShaderRecompiler::Frontend;
@@ -1381,16 +1388,22 @@ static bool MergeBlobShards(GraphicContext& graphics, bool prune, bool keep_shar
 // The shard files are removed once merged. A pruned merge makes the store of this run's pipelines alone: stamped with the
 // translation features they were made with; a precompile's last merge (`stamp`) with those it tried (WriteStaticFeatures).
 bool PipelineCache::MergePrecompileShards(GraphicContext& graphics, bool prune, bool keep_shards, bool stamp) {
+	const auto active  = graphics.pipeline_binaries_enabled ? StaticBinariesPath()
+	                     : StaticBlobsMode(graphics)         ? StaticBlobsPath()
+	                                                         : StaticCachePath();
 	const auto stamped = [&](bool merged) {
-		if (merged && (prune || stamp)) WriteStaticFeatures(prune);
+		if (merged && (prune || stamp)) {
+			WriteStaticFeatures(prune);
+			// (The store as of this precompile: with nothing new to merge it is not rewritten, and it kept its time from
+			// before the seeds of a newer emulator - out of date at every start, issue #143.)
+			std::error_code error;
+			std::filesystem::last_write_time(active, std::filesystem::file_time_type::clock::now(), error);
+		}
 		return merged;
 	};
 	// The shards of the other two kinds of store (made by another driver, with or without pipeline binaries): never
 	// merged here, gone with the rest (issue #126).
 	if (!keep_shards) {
-		const auto active = graphics.pipeline_binaries_enabled ? StaticBinariesPath()
-		                    : StaticBlobsMode(graphics)         ? StaticBlobsPath()
-		                                                        : StaticCachePath();
 		std::vector<std::filesystem::path> stale;
 		std::error_code                    error;
 		for (const auto& other: {StaticBinariesPath(), StaticBlobsPath(), StaticCachePath()}) {
