@@ -2865,6 +2865,7 @@ void BufferCache::Defragment(uint64_t tick) {
 		for (auto* allocation: m_defrag_free_later) vmaFreeMemory(allocator, allocation);
 		m_defrag_free_later.clear();
 		m_defrag_moves.clear();
+		ReleaseBufferFrees();
 		if (result != VK_INCOMPLETE) EndDefragmentation();
 		return;
 	}
@@ -2914,8 +2915,11 @@ void BufferCache::Defragment(uint64_t tick) {
 	}
 	// (On the command buffer being recorded: MoveSpilledBufferBack.)
 	if (!m_scheduler.Active() || m_scheduler.Current().IsInvalid()) return;
+	// (The allocations of buffers erased before it stay till its end: their free on the reclaimer's thread waits.)
+	if (!HoldBufferFrees()) return;
 	timed.on = true;
 	if (vmaBeginDefragmentationPass(allocator, m_defrag, &m_defrag_pass) != VK_INCOMPLETE) {
+		ReleaseBufferFrees();
 		EndDefragmentation();
 		return;
 	}
