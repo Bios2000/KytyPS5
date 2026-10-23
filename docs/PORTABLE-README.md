@@ -407,7 +407,8 @@ hurts.
   mode" in the launcher (see above). The frame rate is then about 37% lower.
 - Sound: 3D sound has no direction, and there is no reverb. On a busy PC it may crackle: the sound buffer
   (20 ms) grows by itself after each dropout; to start with a bigger one: `run.cmd -Set KYTY_AUDIO_BUFFER_MS=60`
-  (up to 200).
+  (up to 200). Where the CPU is at its limit and the game makes its sound too late, the sound is stretched a
+  little to fill the gaps instead of cutting out (`-Set KYTY_AUDIO_STRETCH=0` turns that off).
 - It uses a lot of memory and video memory: on PCs with too little it may just exit.
 - On some PCs whose RAM runs full (mostly 16 GB with a browser open), Windows stops with a
   MEMORY_MANAGEMENT blue screen after 10 minutes to an hour of play (issue #50, being worked on). Until it is
