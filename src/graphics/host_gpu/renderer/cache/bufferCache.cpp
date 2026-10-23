@@ -92,6 +92,16 @@ struct NativeBufferDownloadScope {
 	~NativeBufferDownloadScope() { --native_buffer_download_depth; }
 };
 
+// KYTY_STAGING_MB: the staging ring's size in MiB, 16 or more (pinned system memory; default
+// 512). Uploads past it take a temporary buffer or the large path (KYTY_STAGING_STATS=1 counts
+// them), and TextureCache's ChunkedUploadMin (256 MiB) does not follow it: below 512, images just
+// under 256 MiB take most of the ring.
+uint64_t StagingRingSize() {
+	const char* value = std::getenv("KYTY_STAGING_MB");
+	const auto  mib = value != nullptr && value[0] != '\0' ? std::strtoull(value, nullptr, 10) : 0;
+	return (mib >= 16 ? mib : 512) * MiB;
+}
+
 } // namespace
 
 void BufferCache::WriteDataBuffer(Buffer& buffer, uint64_t address, const void* source,
@@ -1333,7 +1343,7 @@ BufferCache::BufferCache(GraphicContext& graphics, CommandScheduler& scheduler,
       m_gds_buffer(graphics, scheduler, MemoryUsage::Stream, 0, AllFlags, GdsBufferSize),
       m_lod_stats_buffer(graphics, scheduler, MemoryUsage::Stream, 0, AllFlags, 256 * 16),
       m_memory_tracker(page_manager),
-      m_staging_buffer(graphics, scheduler, MemoryUsage::Upload, 512 * MiB,
+      m_staging_buffer(graphics, scheduler, MemoryUsage::Upload, StagingRingSize(),
                        AllFlags | vk::BufferUsageFlagBits::eShaderDeviceAddress),
       m_stream_buffer(graphics, scheduler, MemoryUsage::Stream, 64 * MiB),
       m_host_shader_upload(graphics, scheduler, MemoryUsage::Upload, 64 * MiB),
@@ -2190,6 +2200,7 @@ vk::Buffer BufferCache::UploadCopies(Buffer& buffer, std::span<vk::BufferCopy> c
 		return staging_ring.Handle();
 	}
 
+	m_staging_buffer.NoteBypass(total_size);
 	auto temporary = std::make_unique<Buffer>(m_graphics, m_scheduler, MemoryUsage::Upload, 0,
 	                                         vk::BufferUsageFlagBits::eTransferSrc, total_size);
 	for (const auto& copy: copies) {
@@ -2355,6 +2366,7 @@ std::pair<Buffer*, uint64_t> BufferCache::ObtainBufferForImage(uint64_t vaddr, u
 	// fills a staging-sized piece at a time (a temporary buffer past that) and only where memory is mapped.
 	if (size > m_staging_buffer.Size()) {
 		path = "large";
+		m_staging_buffer.NoteBypass(size);
 		ApplyImageProtects();
 		return ObtainBuffer(vaddr, size, false, false);
 	}
