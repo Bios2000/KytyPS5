@@ -1763,11 +1763,23 @@ public:
 
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 	// KYTY_READ_GUARD: the 4 KiB page of `vaddr` guarded again after its guard raised a fault, when it is a guest view's
-	// (true); as the trackers' protections, after any map or unmap over it.
+	// (true). At once, without the lock: Windows took the guard off as it raised the fault, and until it is back any other
+	// thread reads the page without a fault - a GPU-written page's stale bytes, a texture-offloaded page's zeros. The
+	// waits for maps and unmaps in flight anywhere (WaitNotBusy with KYTY_PROTECT_SERIAL) left it open for whole system
+	// calls while the game streamed (issues #157, #158). A guest view is a mapped view of the backing section
+	// (MEM_MAPPED); guards in the guest's private memory are its stacks' (GuestStackOverflow). A guard armed over a change
+	// another thread made meanwhile is settled once the fault is served (SettleReadGuard); a view mapped or unmapped
+	// meanwhile takes the locked path below.
 	bool ArmReadGuard(uint64_t vaddr) {
-		constexpr uint64_t Page = 0x1000;
-		const uint64_t     page = vaddr & ~(Page - 1);
-		std::shared_lock   lock(m_mutex);
+		constexpr uint64_t       Page = 0x1000;
+		const uint64_t           page = vaddr & ~(Page - 1);
+		MEMORY_BASIC_INFORMATION info {};
+		if (VirtualQuery(reinterpret_cast<const void*>(page), &info, sizeof(info)) != sizeof(info) ||
+		    info.Type != MEM_MAPPED || info.State != MEM_COMMIT)
+			return false;
+		if (DWORD old = 0; VirtualProtect(reinterpret_cast<void*>(page), Page, PAGE_GUARD | PAGE_READONLY, &old) != 0)
+			return true;
+		std::shared_lock lock(m_mutex);
 		WaitNotBusy(lock, page, Page);
 		auto it = m_mapped.upper_bound(page);
 		if (it == m_mapped.begin()) return false;
