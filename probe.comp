@@ -1,0 +1,22 @@
+#version 450
+#extension GL_KHR_shader_subgroup_basic : require
+// One record per invocation, indexed by gl_LocalInvocationIndex: which subgroup and which lane of it the driver gave
+// that invocation. KytyPS5's cooperative halves assume subgroup = index / 32, lane = index % 32.
+layout(local_size_x = LX, local_size_y = LY) in;
+layout(std430, binding = 0) buffer Out { uint data[]; };
+layout(binding = 1, rgba8) uniform readonly image2D img;
+layout(binding = 2) uniform sampler2D tex;
+void main() {
+	uint i    = gl_LocalInvocationIndex;
+	uint base = (gl_WorkGroupID.y * gl_NumWorkGroups.x + gl_WorkGroupID.x) * 64u * 4u + i * 4u;
+	uint extra = 0u;
+#if MODE == 1
+	extra = uint(imageLoad(img, ivec2(gl_GlobalInvocationID.xy) & 7).x * 255.0) << 16;
+#elif MODE == 2
+	extra = uint(textureLod(tex, (vec2(gl_GlobalInvocationID.xy) + 0.5) / 8.0, 0.0).x * 255.0) << 16;
+#endif
+	data[base + 0u] = gl_SubgroupID;
+	data[base + 1u] = gl_SubgroupInvocationID;
+	data[base + 2u] = gl_SubgroupSize;
+	data[base + 3u] = (gl_LocalInvocationID.x | (gl_LocalInvocationID.y << 8)) + extra;
+}
